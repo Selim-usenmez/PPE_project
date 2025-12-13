@@ -19,17 +19,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Identifiants incorrects" }, { status: 401 });
     }
 
-    // 👇 --- NOUVEAU : VÉRIFICATION PÉRIODE DE VALIDITÉ ---
+    // --- VÉRIFICATION PÉRIODE DE VALIDITÉ ---
     const now = new Date();
 
-    // 1. Si une date de début existe et qu'on est AVANT
     if (user.date_debut_validite && now < user.date_debut_validite) {
         return NextResponse.json({ 
             error: `Votre compte ne sera actif qu'à partir du ${new Date(user.date_debut_validite).toLocaleDateString()}.` 
         }, { status: 403 });
     }
 
-    // 2. Si une date de fin existe et qu'on est APRÈS
     if (user.date_fin_validite && now > user.date_fin_validite) {
         return NextResponse.json({ 
             error: "Votre compte a expiré. Contactez l'administrateur." 
@@ -70,7 +68,10 @@ export async function POST(req: Request) {
     // 4. Dire au Frontend : "C'est bon, mais demande le code maintenant"
     return NextResponse.json({ 
         require2fa: true, 
-        email: user.email // On renvoie l'email pour que le frontend sache qui vérifier
+        email: user.email, 
+        
+        // 👇 AJOUT CRITIQUE : L'ID de l'employé est nécessaire pour le Dashboard
+        id_employe: user.id_employe
     });
 
   } catch (error: any) {

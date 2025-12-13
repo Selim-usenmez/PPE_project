@@ -60,29 +60,31 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: form.email, code }),
       });
-      const data = await res.json();
+      
+      // CORRECTION CRITIQUE : Lire le JSON une seule fois
+      const data = await res.json(); 
 
       console.log("Réponse API reçue :", data);
 
       if (res.ok) {
-        toast.success(`Bienvenue ${data.user.prenom} ! 🚀`);
+        // Le statut HTTP 200 indique que la vérification est OK.
         
-        // Stockage des infos pour l'affichage (important)
-        localStorage.setItem("user_info", JSON.stringify(data.user));
-
-        // Redirection
-        if (data.user.role === "ADMIN") {
-            window.location.href = "/admin/dashboard";
-        } else {
-            window.location.href = "/employe/dashboard";
-        }
-    
+        // Lire "prenom" directement depuis "data" (car l'API est maintenant "à plat")
+        toast.success(`Bienvenue ${data.prenom} ! 🚀`); 
+        
+        // Stockage de l'objet utilisateur complet (data) dans localStorage
+        localStorage.setItem("user_info", JSON.stringify(data)); 
+        
+        // Redirection vers le tableau de bord
+        router.push("/employe/dashboard");
+      
       } else {
+        // Le statut HTTP n'est pas 200 (ex: 400 ou 401). Le message d'erreur est dans data.error
         toast.error(data.error || "Code invalide");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error("Erreur réseau lors de la vérification");
+      toast.error(err.message || "Erreur réseau lors de la vérification");
     } finally {
       setLoading(false);
     }

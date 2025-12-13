@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createLog } from "@/lib/logger";
-
+import { createLog } from "@/lib/logger"; // Gardons cette ligne si elle est nécessaire pour votre projet
 
 export async function POST(req: Request) {
   try {
@@ -16,7 +15,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Code invalide" }, { status: 400 });
     }
 
-    // 2. Vérifier l'expiration
+    // 2. Vérifier l'expiration (Ajout de la vérification de non-nullité pour TypeScript)
     if (!user.twoFactorExpires || new Date() > user.twoFactorExpires) {
         return NextResponse.json({ error: "Code expiré" }, { status: 400 });
     }
@@ -27,43 +26,40 @@ export async function POST(req: Request) {
         data: { twoFactorCode: null, twoFactorExpires: null }
     });
 
-   
-
-    const response = NextResponse.json({ 
-        message: "Connexion réussie", 
-        user: { 
-            id: user.id_employe, 
-            nom: user.nom, 
-            prenom: user.prenom, 
-            role: user.role 
-        } 
-    });
-
-    response.cookies.set("session_user", JSON.stringify({
-        id: user.id_employe,
+    // 4. PRÉPARER L'OBJET UTILISATEUR COMPLET pour le Frontend et le Cookie
+    const userDataToSend = {
+        id_employe: user.id_employe, // CORRECTION : Utiliser le nom de clé attendu par le Frontend
         nom: user.nom,
         prenom: user.prenom,
         role: user.role,
-        email: user.email
-    }), {
-        httpOnly: true,
-        
-        // 👇 C'EST ICI LE SECRET : IL FAUT secure: false EN LOCAL
-        secure: process.env.NODE_ENV === "production", 
-        
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 7, // 7 jours
-        path: "/", // Important pour que le cookie marche sur tout le site
+        email: user.email // Ajout de l'email pour être complet
+    };
+
+    // 5. Création de la réponse (pour le Frontend)
+    const response = NextResponse.json({ 
+        message: "Connexion réussie", 
+        // CORRECTION MAJEURE : On envoie l'objet utilisateur directement à la racine de la réponse
+        ...userDataToSend
     });
 
-    await createLog("CONNEXION", `Connexion réussie via 2FA pour ${user.email}`);
+    // 6. Création du cookie (pour la sécurité côté serveur)
+    response.cookies.set("session_user", JSON.stringify(userDataToSend), { // Utiliser l'objet complet
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production", 
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 7, // 7 jours
+        path: "/",
+    });
 
+    if (createLog) { // Seulement si la fonction est importée et nécessaire
+        await createLog("CONNEXION", `Connexion réussie via 2FA pour ${user.email}`);
+    }
+    
     return response;
 
   } catch (error) {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+    console.error("Erreur 2FA:", error); // Afficher l'erreur serveur
+    return NextResponse.json({ error: "Erreur serveur lors de la connexion" }, { status: 500 });
     
   }
-
-  
 }

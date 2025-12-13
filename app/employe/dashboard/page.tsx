@@ -6,7 +6,7 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import frLocale from '@fullcalendar/core/locales/fr'; // Pour mettre en français
+import frLocale from '@fullcalendar/core/locales/fr';
 
 export default function EmployeDashboard() {
   const router = useRouter();
@@ -14,20 +14,9 @@ export default function EmployeDashboard() {
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<any[]>([]);
   const [stats, setStats] = useState({ projets: 0, reservations: 0 });
+  const [mesProjets, setMesProjets] = useState<any[]>([]); // Ajout de l'état pour la liste des projets
 
-  useEffect(() => {
-    const stored = localStorage.getItem("user_info");
-    if (!stored) {
-      router.push("/login");
-      return;
-    }
-    const userData = JSON.parse(stored);
-    setUser(userData);
-
-    // Charger les données réelles
-    fetchPlanning(userData.id_employe);
-  }, [router]);
-
+  // --- 1. FONCTION DE CHARGEMENT DU PLANNING ---
   const fetchPlanning = async (id_employe: string) => {
     try {
         const res = await fetch(`/api/employes/${id_employe}/planning`);
@@ -35,18 +24,69 @@ export default function EmployeDashboard() {
             const data = await res.json();
             setEvents(data);
             
-            // Calculer des stats simples basées sur les données reçues
-            setStats({
+            // On calcule uniquement le nombre de réservations ici
+            setStats(prev => ({
+                ...prev,
                 reservations: data.length,
-                projets: new Set(data.map((e: any) => e.title.split(' - ')[0])).size // Compte les projets uniques
-            });
+            }));
         }
     } catch (e) {
-        console.error(e);
-    } finally {
-        setLoading(false);
+        console.error("Erreur fetchPlanning:", e);
     }
   };
+
+  // --- 2. FONCTION DE CHARGEMENT DES PROJETS (Manquante) ---
+  const fetchProjets = async (id: string) => {
+    try {
+        // Cette API est supposée renvoyer une liste de projets
+        const res = await fetch(`/api/employes/${id}/projets`); 
+        if (res.ok) {
+            const data = await res.json();
+            setMesProjets(data); // Stocke la liste pour un affichage futur
+            
+            // On utilise la liste de projets pour le compteur !
+            setStats(prev => ({ 
+                ...prev, 
+                projets: data.length 
+            })); 
+        }
+    } catch (e) { console.error("Erreur fetchProjets:", e); }
+  };
+
+
+  // --- 3. LOGIQUE D'INITIALISATION (useEffect) ---
+  useEffect(() => {
+    const stored = localStorage.getItem("user_info");
+    if (!stored) {
+      router.push("/login");
+      return;
+    }
+    
+    const userData = JSON.parse(stored);
+    
+    // VÉRIFICATION CRITIQUE : Si l'ID est manquant, on s'arrête.
+    if (!userData || !userData.id_employe) {
+        console.error("ERREUR FRONTEND: ID employé manquant dans localStorage.");
+        router.push("/login");
+        return;
+    }
+    
+    setUser(userData); // Set l'utilisateur
+
+    // 2. Charger les données SEULEMENT APRES AVOIR L'ID
+    const loadAllData = async () => {
+        setLoading(true);
+        // On lance la récupération pour l'ID valide
+        await Promise.all([
+            fetchPlanning(userData.id_employe),
+            fetchProjets(userData.id_employe) // Maintenant, cette fonction existe
+        ]);
+        setLoading(false);
+    };
+
+    loadAllData();
+    
+  }, [router]);
 
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });

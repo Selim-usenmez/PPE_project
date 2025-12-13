@@ -2,27 +2,29 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  // Correction Next.js 15 (await params)
   const { id } = await params;
+  console.log(`🔍 [API Projets] Recherche pour ID: ${id}`); // DEBUG
+
+  if (!id) return NextResponse.json({ error: "ID manquant" }, { status: 400 });
 
   try {
-    // On récupère les participations de l'employé
     const participations = await prisma.participationProjet.findMany({
-      where: { id_employe: id },
+      where: { id_employe: id }, // Le filtre
       include: {
-        projet: true // On inclut les infos du projet
+        projet: true
       },
       orderBy: {
-        projet: { date_fin: 'asc' } // Tri par date de fin la plus proche
+        projet: { date_fin: 'asc' }
       }
     });
 
-    // On extrait juste la partie "projet" pour simplifier le frontend
+    console.log(`📊 [API Projets] Participations trouvées: ${participations.length}`); // DEBUG
+
     const projets = participations.map(p => p.projet);
 
     return NextResponse.json(projets);
   } catch (error) {
-    console.error(error);
+    console.error("Erreur API Projets:", error);
     return NextResponse.json({ error: "Erreur chargement projets" }, { status: 500 });
   }
 }
