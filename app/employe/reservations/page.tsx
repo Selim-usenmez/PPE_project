@@ -5,17 +5,15 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 
-export default function ReservationsPage() {
+export default function EmployeReservationsPage() {
   const router = useRouter();
+  const [user, setUser] = useState<any>(null);
   
   // Données
   const [salles, setSalles] = useState<any[]>([]);
   const [projets, setProjets] = useState<any[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // UI States
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Formulaire
   const [form, setForm] = useState({
@@ -29,17 +27,17 @@ export default function ReservationsPage() {
   useEffect(() => {
     const stored = localStorage.getItem("user_info");
     if (!stored) { router.push("/login"); return; }
+    setUser(JSON.parse(stored));
 
     Promise.all([
       fetch("/api/salles").then(r => r.json()),
-      fetch("/api/projets").then(r => r.json()),
+      fetch("/api/projets").then(r => r.json()), // L'employé ne devrait voir que SES projets idéalement
       fetch("/api/reservations").then(r => r.json())
     ]).then(([sallesData, projetsData, resasData]) => {
       setSalles(sallesData);
       setProjets(projetsData);
       setReservations(resasData);
       
-      // Pré-remplir intelligemment
       if (sallesData.length > 0) setForm(f => ({ ...f, id_salle: sallesData[0].id_salle }));
       if (projetsData.length > 0) setForm(f => ({ ...f, id_projet: projetsData[0].id_projet }));
       
@@ -50,7 +48,6 @@ export default function ReservationsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Petite validation locale
     if(new Date(form.date_debut) >= new Date(form.date_fin)) {
         toast.error("La date de fin doit être après le début.");
         return;
@@ -67,40 +64,21 @@ export default function ReservationsPage() {
 
         if (res.ok) {
             toast.success("Réservation confirmée ! 📅");
-            // Rafraîchir la liste sans recharger la page
             const newResas = await fetch("/api/reservations").then(r => r.json());
             setReservations(newResas);
-            // Reset dates pour éviter doublons involontaires
             setForm(f => ({ ...f, objet: "" }));
         } else {
-            // Affichage de l'erreur API (ex: "Salle déjà prise")
             toast.error(data.error || "Erreur lors de la réservation");
         }
     } catch (e) { toast.error("Erreur serveur"); }
   };
 
-  const handleDelete = async () => {
-    if(!confirmDeleteId) return;
-
-    try {
-        const res = await fetch(`/api/reservations?id=${confirmDeleteId}`, { method: "DELETE" });
-        if(res.ok) {
-            toast.success("Réservation annulée 🗑️");
-            setReservations(reservations.filter(r => r.id_reservation !== confirmDeleteId));
-        } else {
-            toast.error("Impossible d'annuler");
-        }
-    } catch (e) { toast.error("Erreur réseau"); }
-    
-    setConfirmDeleteId(null);
-  };
+  // L'employé ne peut pas supprimer (pour l'instant, pour simplifier)
+  // Ou alors tu peux ajouter une vérification si c'est LUI qui a créé la resa.
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-[#030712]">
-        <div className="flex flex-col items-center gap-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-            <p className="text-blue-400 animate-pulse font-mono">Chargement du planning...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
     </div>
   );
 
@@ -108,30 +86,27 @@ export default function ReservationsPage() {
     <div className="min-h-screen p-6 md:p-10 text-gray-200 bg-[#030712]">
       <div className="max-w-7xl mx-auto animate-fade-in-up">
         
-        {/* HEADER */}
+        {/* HEADER SIMPLE AVEC RETOUR DASHBOARD */}
         <div className="flex flex-col md:flex-row items-center justify-between mb-8 glass-panel p-6 rounded-2xl shadow-lg">
             <div>
                 <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
-                    📅 Réservation de Salles
+                    📅 Réserver une salle
                 </h1>
-                <p className="text-gray-400 mt-1 text-sm">Organisez vos réunions et vérifiez les disponibilités.</p>
+                <p className="text-gray-400 mt-1 text-sm">Vérifiez les disponibilités et bloquez un créneau.</p>
             </div>
-            <Link href="/admin/dashboard" className="mt-4 md:mt-0 px-5 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition text-sm font-bold flex items-center gap-2 group">
+            <Link href="/employe/dashboard" className="mt-4 md:mt-0 px-5 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition text-sm font-bold flex items-center gap-2 group">
                 <span>←</span> <span className="group-hover:translate-x-1 transition-transform">Retour Dashboard</span>
             </Link>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            {/* --- FORMULAIRE (Gauche) --- */}
+            {/* --- FORMULAIRE --- */}
             <div className="lg:col-span-1">
-                <div className="glass-panel p-8 rounded-2xl sticky top-8 border border-white/10 shadow-[0_0_30px_rgba(59,130,246,0.1)]">
-                    <h2 className="text-xl font-bold mb-6 text-blue-400 border-b border-white/10 pb-4 flex items-center gap-2">
-                        <span>📝</span> Nouvelle Demande
-                    </h2>
+                <div className="glass-panel p-8 rounded-2xl sticky top-8 border border-white/10">
+                    <h2 className="text-xl font-bold mb-6 text-blue-400 border-b border-white/10 pb-4">Nouvelle Demande</h2>
                     
                     <form onSubmit={handleSubmit} className="space-y-5">
-                        {/* Salle */}
                         <div>
                             <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Salle</label>
                             <select className="glass-input w-full cursor-pointer" 
@@ -140,29 +115,20 @@ export default function ReservationsPage() {
                             </select>
                         </div>
 
-                        {/* Projet */}
                         <div>
-                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Projet associé</label>
-                            {projets.length > 0 ? (
-                                <select className="glass-input w-full cursor-pointer" 
-                                    value={form.id_projet} onChange={e => setForm({...form, id_projet: e.target.value})}>
-                                    {projets.map(p => <option key={p.id_projet} className="bg-slate-900" value={p.id_projet}>{p.nom_projet}</option>)}
-                                </select>
-                            ) : (
-                                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-300 text-xs text-center">
-                                    Aucun projet actif. Contactez un admin.
-                                </div>
-                            )}
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Projet</label>
+                            <select className="glass-input w-full cursor-pointer" 
+                                value={form.id_projet} onChange={e => setForm({...form, id_projet: e.target.value})}>
+                                {projets.map(p => <option key={p.id_projet} className="bg-slate-900" value={p.id_projet}>{p.nom_projet}</option>)}
+                            </select>
                         </div>
 
-                        {/* Motif */}
                         <div>
                             <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Motif</label>
-                            <input type="text" className="glass-input w-full placeholder-gray-600" placeholder="Ex: Daily Meeting" required
+                            <input type="text" className="glass-input w-full placeholder-gray-600" placeholder="Ex: Point d'avancement" required
                                 value={form.objet} onChange={e => setForm({...form, objet: e.target.value})} />
                         </div>
 
-                        {/* Dates */}
                         <div className="grid grid-cols-1 gap-4 bg-black/20 p-4 rounded-xl border border-white/5">
                             <div>
                                 <label className="block text-[10px] font-bold text-blue-300 uppercase tracking-widest mb-2">Début</label>
@@ -176,21 +142,19 @@ export default function ReservationsPage() {
                             </div>
                         </div>
 
-                        <button type="submit" disabled={projets.length === 0}
-                            className="w-full btn-neon-blue py-3 rounded-xl font-bold mt-4 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-blue-500/20 transition-all transform hover:scale-[1.02]">
-                            Confirmer la réservation
+                        <button type="submit" 
+                            className="w-full btn-neon-blue py-3 rounded-xl font-bold mt-4 shadow-lg hover:shadow-blue-500/20 transition-all transform hover:scale-[1.02]">
+                            Confirmer
                         </button>
                     </form>
                 </div>
             </div>
 
-            {/* --- LISTE DES RÉSERVATIONS (Droite) --- */}
+            {/* --- LISTE (Lecture Seule pour l'employé) --- */}
             <div className="lg:col-span-2">
                 <div className="glass-panel rounded-2xl overflow-hidden min-h-[600px] flex flex-col">
                     <div className="p-6 border-b border-white/10 bg-gradient-to-r from-blue-900/20 to-transparent">
-                        <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                            <span>📆</span> Planning Global
-                        </h2>
+                        <h2 className="text-xl font-bold text-white">📅 Planning Global</h2>
                     </div>
                     
                     {reservations.length === 0 ? (
@@ -201,10 +165,9 @@ export default function ReservationsPage() {
                     ) : (
                         <div className="divide-y divide-white/5 overflow-y-auto custom-scrollbar max-h-[800px]">
                             {reservations.map(res => (
-                                <div key={res.id_reservation} className="p-5 hover:bg-white/5 transition flex justify-between items-center group relative overflow-hidden">
-                                    <div className="flex items-center gap-5 relative z-10">
-                                        {/* Date Box */}
-                                        <div className="flex flex-col items-center justify-center bg-white/5 border border-white/10 rounded-xl p-3 w-16 h-16 shadow-inner">
+                                <div key={res.id_reservation} className="p-5 hover:bg-white/5 transition flex justify-between items-center group">
+                                    <div className="flex items-center gap-5">
+                                        <div className="flex flex-col items-center justify-center bg-white/5 border border-white/10 rounded-xl p-3 w-16 h-16">
                                             <div className="text-[10px] text-blue-300 uppercase font-bold tracking-wide">
                                                 {new Date(res.date_debut).toLocaleDateString('fr-FR', {weekday: 'short'})}
                                             </div>
@@ -215,7 +178,7 @@ export default function ReservationsPage() {
                                         
                                         <div>
                                             <div className="flex items-center gap-3 mb-1">
-                                                <span className="font-bold text-white text-lg tracking-tight">{res.salle.nom_salle}</span>
+                                                <span className="font-bold text-white text-lg">{res.salle.nom_salle}</span>
                                                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20 uppercase font-bold">
                                                     {res.projet?.nom_projet}
                                                 </span>
@@ -229,11 +192,7 @@ export default function ReservationsPage() {
                                             </div>
                                         </div>
                                     </div>
-                                    
-                                    <button onClick={() => setConfirmDeleteId(res.id_reservation)} 
-                                        className="text-red-400 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500/10 transform hover:scale-110 z-10" title="Annuler">
-                                        ✕
-                                    </button>
+                                    {/* Pas de bouton supprimer pour l'employé ici pour simplifier */}
                                 </div>
                             ))}
                         </div>
@@ -242,32 +201,6 @@ export default function ReservationsPage() {
             </div>
 
         </div>
-
-        {/* MODALE DE SUPPRESSION (Style Glass) */}
-        {confirmDeleteId && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-[999] animate-fade-in">
-                <div className="glass-panel p-8 rounded-2xl w-full max-w-sm text-center border border-red-500/30 shadow-[0_0_50px_rgba(239,68,68,0.2)]">
-                    <div className="text-5xl mb-4">🗑️</div>
-                    <h3 className="text-xl font-bold text-white mb-2">Annuler la réservation ?</h3>
-                    <p className="text-gray-400 text-sm mb-6">Cette action libérera le créneau pour les autres équipes.</p>
-                    <div className="flex justify-center gap-4">
-                        <button 
-                            onClick={() => setConfirmDeleteId(null)} 
-                            className="px-4 py-2 rounded-lg text-gray-300 hover:bg-white/10 transition"
-                        >
-                            Retour
-                        </button>
-                        <button 
-                            onClick={handleDelete} 
-                            className="btn-neon-red px-6 py-2 rounded-lg font-bold"
-                        >
-                            Oui, annuler
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
-
       </div>
     </div>
   );

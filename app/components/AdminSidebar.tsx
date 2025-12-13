@@ -8,7 +8,7 @@ import { canManageEmployees } from "@/lib/permissions";
 export default function AdminSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [role, setRole] = useState("STAGIAIRE"); // Par défaut, le plus restrictif
+  const [role, setRole] = useState("STAGIAIRE");
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("user_info") || "{}");
@@ -23,15 +23,18 @@ export default function AdminSidebar() {
 
   const isActive = (path: string) => pathname === path;
 
-  // Définition des liens avec droits d'accès
   const allLinks = [
     { name: "Dashboard", path: "/admin/dashboard", icon: "📊", access: true },
-    { name: "Employés", path: "/admin/employes", icon: "👥", access: canManageEmployees(role) }, // 🔒 Protégé
+    { name: "Employés", path: "/admin/employes", icon: "👥", access: canManageEmployees(role) },
     { name: "Salles", path: "/admin/salles", icon: "🏢", access: true },
-    { name: "Projets", path: "/admin/projets", icon: "🚀", access: true }, // Tout le monde voit, mais actions limitées dans la page
+    
+    // 👇 CHEMIN CORRIGÉ ICI : /admin/reservation
+    { name: "Réservations", path: "/admin/reservations", icon: "📅", access: true },
+
+    { name: "Projets", path: "/admin/projets", icon: "🚀", access: true },
     { name: "Ressources", path: "/admin/ressources", icon: "📦", access: true },
     { name: "Incidents", path: "/admin/incidents", icon: "⚠️", access: true },
-    { name: "Historique", path: "/admin/historique", icon: "📜", access: role === "ADMIN" }, // 🔒 Seul l'Admin voit les logs
+    { name: "Historique", path: "/admin/historique", icon: "📜", access: role === "ADMIN" },
   ];
 
   return (
