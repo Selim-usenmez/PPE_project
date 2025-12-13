@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canManageEmployees } from "@/lib/permissions";
+import bcrypt from "bcryptjs"; // 👈 NOUVEL IMPORT NÉCESSAIRE
+// import { canManageEmployees } from "@/lib/permissions"; // Maintenu si nécessaire
+
+const SALT_ROUNDS = 10; // Niveau de complexité pour le hachage
 
 // --- GET : Lister les employés ---
 export async function GET(req: Request) {
@@ -40,13 +43,16 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Cet email est déjà utilisé" }, { status: 400 });
     }
 
+    // 🚩 CORRECTION CRITIQUE 1: Hacher le mot de passe avant de l'enregistrer
+    const hashedPassword = await bcrypt.hash(body.password, SALT_ROUNDS);
+
     // Création
     const newEmploye = await prisma.employe.create({
       data: {
         nom: body.nom,
         prenom: body.prenom,
         email: body.email,
-        mot_de_passe: body.password, // Pense à hasher ce mot de passe avec bcrypt !
+        mot_de_passe: hashedPassword, // 👈 Utilisation du hachage
         role: body.role || "DEVELOPPEUR",
         date_debut_validite: body.dateDebut ? new Date(body.dateDebut) : null,
         date_fin_validite: body.dateFin ? new Date(body.dateFin) : null,
@@ -62,7 +68,9 @@ export async function POST(req: Request) {
         }
     });
 
-    return NextResponse.json(newEmploye, { status: 201 });
+    // IMPORTANT : On ne renvoie pas le mot de passe haché au frontend
+    const { mot_de_passe, ...employeSansMdp } = newEmploye; 
+    return NextResponse.json(employeSansMdp, { status: 201 });
   } catch (error) {
     console.error("Erreur POST Employé:", error);
     return NextResponse.json({ error: "Erreur lors de la création" }, { status: 500 });
@@ -87,17 +95,19 @@ export async function PUT(req: Request) {
         date_fin_validite: updates.dateFin ? new Date(updates.dateFin) : null,
     };
 
-    // On ne met à jour le mot de passe que s'il est fourni
+    // 🚩 CORRECTION CRITIQUE 2: Hacher le mot de passe si un nouveau est fourni
     if (updates.password && updates.password.length > 0) {
-        dataToUpdate.mot_de_passe = updates.password;
+        dataToUpdate.mot_de_passe = await bcrypt.hash(updates.password, SALT_ROUNDS); // 👈 Utilisation du hachage
     }
 
     const updatedEmploye = await prisma.employe.update({
       where: { id_employe },
       data: dataToUpdate,
     });
-
-    return NextResponse.json(updatedEmploye);
+    
+    // IMPORTANT : On ne renvoie pas le mot de passe haché au frontend
+    const { mot_de_passe, ...employeSansMdp } = updatedEmploye; 
+    return NextResponse.json(employeSansMdp);
   } catch (error) {
     console.error("Erreur PUT Employé:", error);
     return NextResponse.json({ error: "Erreur modification" }, { status: 500 });
