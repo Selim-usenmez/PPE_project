@@ -57,9 +57,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
 // DELETE
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  // Même si on n'utilise pas 'id' ici, TypeScript vérifie la signature
-  // On peut laisser params tel quel ou juste mettre await params pour être safe
-  await params; 
+  await params; // 👈 Même si on ne s'en sert pas, il faut l'attendre pour satisfaire Next.js
   
   try {
     const { searchParams } = new URL(req.url);
