@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// 👇 Note le type : Promise<{ id: string }>
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
-    // 👇 INDISPENSABLE : On attend la résolution des paramètres
-    const { id } = await params;
-
+    // 1. On cherche les projets où l'employé est participant
+    // 2. Et on ne prend que les projets EN_COURS ou TERMINE
+    // 3. On récupère les réservations de salle liées à ces projets
+    
     const reservations = await prisma.reservationSalle.findMany({
       where: {
         projet: {
+          // Filtrer par statut du projet
           statut: { in: ['EN_COURS', 'TERMINE'] },
+          // Filtrer : l'employé doit faire partie de l'équipe
           participations: {
-            some: { id_employe: id } // On utilise la variable 'id' extraite
+            some: { id_employe: params.id }
           }
         }
       },
@@ -22,12 +24,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       }
     });
 
+    // On transforme les données pour FullCalendar
     const events = reservations.map(res => ({
       id: res.id_reservation,
       title: `${res.projet.nom_projet} - ${res.salle.nom_salle}`,
       start: res.date_debut,
       end: res.date_fin,
-      color: res.projet.statut === 'EN_COURS' ? '#3b82f6' : '#22c55e',
+      // Couleur selon le statut
+      color: res.projet.statut === 'EN_COURS' ? '#3b82f6' : '#22c55e', // Bleu ou Vert
       extendedProps: {
         description: res.objet || "Réunion de projet",
         salle: res.salle.nom_salle

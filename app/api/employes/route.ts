@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canManageEmployees } from "@/lib/permissions";
+import bcrypt from "bcryptjs";
 
-// --- GET : Lister les employés ---
-export async function GET(req: Request) {
+// GET : Récupérer la liste des employés
+export async function GET() {
   try {
     const employes = await prisma.employe.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: { nom: 'asc' },
+      // On exclut le mot de passe de la réponse pour la sécurité
       select: {
         id_employe: true,
         nom: true,
@@ -15,96 +16,90 @@ export async function GET(req: Request) {
         role: true,
         date_debut_validite: true,
         date_fin_validite: true,
-        // On ne renvoie JAMAIS le mot de passe !
+        // Pas de mot_de_passe ici !
       }
     });
     return NextResponse.json(employes);
   } catch (error) {
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+    return NextResponse.json({ error: "Erreur chargement employés" }, { status: 500 });
   }
 }
 
-// --- POST : Créer un employé ---
+// POST : Créer un nouvel employé (AVEC HACHAGE)
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    
-    // Vérification basique des champs
-    if (!body.email || !body.password || !body.nom || !body.prenom) {
-        return NextResponse.json({ error: "Champs manquants" }, { status: 400 });
+    const { nom, prenom, email, role, password, dateDebut, dateFin } = body;
+
+    // Vérification basique
+    if (!email || !password || !nom || !prenom) {
+        return NextResponse.json({ error: "Champs obligatoires manquants" }, { status: 400 });
     }
 
     // Vérifier si l'email existe déjà
-    const existing = await prisma.employe.findUnique({ where: { email: body.email } });
+    const existing = await prisma.employe.findUnique({ where: { email } });
     if (existing) {
-        return NextResponse.json({ error: "Cet email est déjà utilisé" }, { status: 400 });
+        return NextResponse.json({ error: "Cet email est déjà utilisé" }, { status: 409 });
     }
 
-    // Création
+    // 🔒 HACHAGE DU MOT DE PASSE
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     const newEmploye = await prisma.employe.create({
       data: {
-        nom: body.nom,
-        prenom: body.prenom,
-        email: body.email,
-        mot_de_passe: body.password, // Pense à hasher ce mot de passe avec bcrypt !
-        role: body.role || "DEVELOPPEUR",
-        date_debut_validite: body.dateDebut ? new Date(body.dateDebut) : null,
-        date_fin_validite: body.dateFin ? new Date(body.dateFin) : null,
-      },
+        nom,
+        prenom,
+        email,
+        role: role || "DEVELOPPEUR",
+        mot_de_passe: hashedPassword, // 👈 On stocke le hash crypté
+        date_debut_validite: dateDebut ? new Date(dateDebut) : null,
+        date_fin_validite: dateFin ? new Date(dateFin) : null
+      }
     });
 
-    // Log pour l'historique (optionnel)
-    await prisma.historiqueAction.create({
-        data: {
-            action: "CRÉATION_EMPLOYE",
-            details: `Création de ${body.prenom} ${body.nom} (${body.role})`,
-            auteur: "Admin Système" // Idéalement, récupérer l'ID de l'admin connecté
-        }
-    });
-
-    return NextResponse.json(newEmploye, { status: 201 });
+    return NextResponse.json(newEmploye);
   } catch (error) {
-    console.error("Erreur POST Employé:", error);
+    console.error(error);
     return NextResponse.json({ error: "Erreur lors de la création" }, { status: 500 });
   }
 }
 
-// --- PUT : Modifier un employé ---
+// PUT : Modifier un employé
 export async function PUT(req: Request) {
   try {
     const body = await req.json();
-    const { id_employe, ...updates } = body;
+    const { id_employe, nom, prenom, email, role, password, dateDebut, dateFin } = body;
 
     if (!id_employe) return NextResponse.json({ error: "ID manquant" }, { status: 400 });
 
-    // Préparation des données à mettre à jour
+    // On prépare l'objet de mise à jour
     const dataToUpdate: any = {
-        nom: updates.nom,
-        prenom: updates.prenom,
-        email: updates.email,
-        role: updates.role,
-        date_debut_validite: updates.dateDebut ? new Date(updates.dateDebut) : null,
-        date_fin_validite: updates.dateFin ? new Date(updates.dateFin) : null,
+      nom, 
+      prenom, 
+      email, 
+      role,
+      date_debut_validite: dateDebut ? new Date(dateDebut) : null,
+      date_fin_validite: dateFin ? new Date(dateFin) : null
     };
 
-    // On ne met à jour le mot de passe que s'il est fourni
-    if (updates.password && updates.password.length > 0) {
-        dataToUpdate.mot_de_passe = updates.password;
+    // 🔒 Si un mot de passe est fourni (non vide), on le hache et on l'ajoute
+    // Sinon, on ne touche pas à l'ancien mot de passe
+    if (password && password.trim() !== "") {
+        dataToUpdate.mot_de_passe = await bcrypt.hash(password, 10);
     }
 
     const updatedEmploye = await prisma.employe.update({
       where: { id_employe },
-      data: dataToUpdate,
+      data: dataToUpdate
     });
 
     return NextResponse.json(updatedEmploye);
   } catch (error) {
-    console.error("Erreur PUT Employé:", error);
-    return NextResponse.json({ error: "Erreur modification" }, { status: 500 });
+    return NextResponse.json({ error: "Erreur lors de la modification" }, { status: 500 });
   }
 }
 
-// --- DELETE : Supprimer un employé ---
+// DELETE : Supprimer un employé
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -112,20 +107,13 @@ export async function DELETE(req: Request) {
 
     if (!id) return NextResponse.json({ error: "ID requis" }, { status: 400 });
 
-    // Suppression
     await prisma.employe.delete({
-      where: { id_employe: id },
+      where: { id_employe: id }
     });
 
-    return NextResponse.json({ message: "Employé supprimé avec succès" });
-  } catch (error: any) {
-    console.error("Erreur DELETE Employé:", error);
-    
-    // Gestion spécifique des erreurs Prisma
-    if (error.code === 'P2003') {
-        return NextResponse.json({ error: "Impossible de supprimer : cet employé est lié à d'autres données (Projets, etc.)" }, { status: 409 });
-    }
-
-    return NextResponse.json({ error: "Erreur serveur lors de la suppression" }, { status: 500 });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    // Erreur fréquente : impossible de supprimer si l'employé est lié à des projets/réservations
+    return NextResponse.json({ error: "Impossible de supprimer (lié à des données)" }, { status: 500 });
   }
 }
