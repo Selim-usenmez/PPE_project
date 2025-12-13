@@ -1,0 +1,214 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// --- MODÈLES ---
+
+model HistoriqueAction {
+  id_action String   @id @default(cuid())
+  action    String   // Ex: "CRÉATION_PROJET"
+  details   String?  // Ex: "Nom du projet : Alpha"
+  auteur    String   // Ex: "Jean Dupont"
+  createdAt DateTime @default(now())
+
+  @@map("historique_actions")
+}
+
+model Employe {
+  id_employe          String    @id @default(cuid())
+  nom                 String
+  prenom              String
+  email               String    @unique
+  mot_de_passe        String
+  
+  // RÔLE : On garde une seule définition propre. Par défaut : DEVELOPPEUR
+  role                Role      @default(DEVELOPPEUR)
+  
+  couleur_fond        String    @default("#ffffff")
+  
+  // Sécurité (2FA)
+  twoFactorCode       String?
+  twoFactorExpires    DateTime?
+  
+  // Validité du compte
+  date_debut_validite DateTime?
+  date_fin_validite   DateTime?
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // RELATIONS
+  participations      ParticipationProjet[]
+  demandes_mdp        DemandeMdp[]
+  ressources_empruntees Ressource[] @relation("Emprunt")
+  signalements        Signalement[]
+
+  @@map("employes")
+}
+
+model DemandeMdp {
+  id_demande String   @id @default(cuid()) // ✅ Seul ID unique
+  id_employe String   // Clé étrangère simple (pas de @id ici)
+  
+  statut     String   @default("EN_ATTENTE")
+  createdAt  DateTime @default(now())
+
+  token      String?  @unique
+  expiresAt  DateTime?
+
+  employe    Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
+
+  @@map("demandes_mdp")
+}
+
+model Projet {
+  id_projet      String                @id @default(cuid())
+  nom_projet     String
+  description    String?
+  date_debut     DateTime
+  date_fin       DateTime?
+  statut         StatutProjet          @default(EN_COURS)
+  
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  
+  participations ParticipationProjet[]
+  reservations   ReservationSalle[]
+
+  @@map("projets")
+}
+
+model ParticipationProjet {
+  id_participation String   @id @default(cuid())
+  id_employe       String
+  id_projet        String
+  date_assignation DateTime @default(now())
+  role_dans_projet String?  // Ex: "Lead Dev", "Testeur"...
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  employe          Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
+  projet           Projet   @relation(fields: [id_projet], references: [id_projet], onDelete: Cascade)
+
+  @@unique([id_employe, id_projet])
+  @@map("participation_projets")
+}
+
+model Ressource {
+  id_ressource     String        @id @default(cuid())
+  nom_ressource    String
+  type             TypeRessource
+  etat             EtatRessource @default(DISPONIBLE)
+  localisation     String?
+  numero_serie     String?       @unique
+  date_acquisition DateTime?
+  description      String?
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // Emprunt
+  id_emprunteur    String?
+  emprunteur       Employe?      @relation("Emprunt", fields: [id_emprunteur], references: [id_employe], onDelete: SetNull)
+
+  // Signalements (Pannes)
+  signalements     Signalement[]
+
+  @@map("ressources")
+}
+
+model Salle {
+  id_salle     String             @id @default(cuid())
+  nom_salle    String             @unique
+  capacite     Int
+  equipements  String?
+  localisation String?
+  
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  
+  reservations ReservationSalle[]
+
+  @@map("salles")
+}
+
+model ReservationSalle {
+  id_reservation String            @id @default(cuid())
+  id_salle       String
+  id_projet      String
+  date_debut     DateTime
+  date_fin       DateTime
+  objet          String?
+  statut         StatutReservation @default(CONFIRMEE)
+  
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  
+  projet         Projet            @relation(fields: [id_projet], references: [id_projet], onDelete: Cascade)
+  salle          Salle             @relation(fields: [id_salle], references: [id_salle], onDelete: Cascade)
+
+  @@map("reservation_salles")
+}
+
+model Signalement {
+  id_signalement String   @id @default(cuid())
+  description    String
+  statut         String   @default("EN_ATTENTE")
+  createdAt      DateTime @default(now())
+
+  id_employe     String
+  employe        Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
+
+  id_ressource   String
+  // 👇 AJOUTE "onDelete: Cascade" ICI 👇
+  ressource      Ressource @relation(fields: [id_ressource], references: [id_ressource], onDelete: Cascade)
+
+  @@map("signalements")
+}
+
+// --- ENUMS ---
+
+enum Role {
+  ADMIN
+  CHEF_DE_PROJET
+  RH
+  DEVELOPPEUR
+  STAGIAIRE
+  EMPLOYE  // 👈 RAJOUTE CETTE LIGNE ICI
+}
+
+enum StatutProjet {
+  EN_COURS
+  TERMINE
+  EN_ATTENTE
+  ANNULE
+}
+
+enum TypeRessource {
+  EQUIPEMENT_LABORATOIRE
+  MATERIEL_INFORMATIQUE
+  EQUIPEMENT_REUNION
+  MATERIEL_SPECIALISE
+  VEHICULE
+  AUTRE
+}
+
+enum EtatRessource {
+  DISPONIBLE
+  EN_UTILISATION
+  EN_MAINTENANCE
+  HORS_SERVICE
+}
+
+enum StatutReservation {
+  CONFIRMEE
+  EN_ATTENTE
+  ANNULEE
+}
