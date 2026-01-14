@@ -7,75 +7,74 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { email, password } = body;
+    const { email, password } = await req.json();
 
-    if (!email || !password) return NextResponse.json({ error: "Champs requis" }, { status: 400 });
-
+    // 1. Récupération de l'utilisateur
     const user = await prisma.employe.findUnique({ where: { email } });
     
-    // Vérification mot de passe
+    // 2. Vérification Identifiants
     if (!user || !(await bcrypt.compare(password, user.mot_de_passe))) {
       return NextResponse.json({ error: "Identifiants incorrects" }, { status: 401 });
     }
 
-    // --- VÉRIFICATION PÉRIODE DE VALIDITÉ ---
+    // 3. 🚩 VÉRIFICATION PÉRIODE DE VALIDITÉ (Je l'ai remise ici !)
     const now = new Date();
 
+    // Si la date de début est dans le futur
     if (user.date_debut_validite && now < user.date_debut_validite) {
         return NextResponse.json({ 
-            error: `Votre compte ne sera actif qu'à partir du ${new Date(user.date_debut_validite).toLocaleDateString()}.` 
+            error: `Compte inactif. Accès autorisé à partir du ${new Date(user.date_debut_validite).toLocaleDateString()}.` 
         }, { status: 403 });
     }
 
+    // Si la date de fin est passée
     if (user.date_fin_validite && now > user.date_fin_validite) {
         return NextResponse.json({ 
             error: "Votre compte a expiré. Contactez l'administrateur." 
         }, { status: 403 });
     }
 
-    // --- DÉBUT 2FA ---
-    
-    // 1. Générer un code à 6 chiffres
+    // 4. VÉRIFICATION CHANGEMENT MDP FORCÉ
+    // On le fait APRÈS la vérif de date, car inutile de changer le MDP si le compte n'est pas actif
+    if (user.doit_changer_mdp) {
+        return NextResponse.json({ 
+            requirePasswordChange: true, 
+            email: user.email 
+        });
+    }
+
+    // 5. ENVOI DU CODE 2FA (Si tout est OK)
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // Valide 10 minutes
+    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    // 2. Sauvegarder dans la BDD
     await prisma.employe.update({
-        where: { id_employe: user.id_employe },
-        data: { 
-            twoFactorCode: code,
-            twoFactorExpires: expiresAt
-        }
+      where: { id_employe: user.id_employe },
+      data: { twoFactorCode: code, twoFactorExpires: expires }
     });
 
-    // 3. Envoyer l'email
     await resend.emails.send({
-        from: 'securite@likeus.dev',
-        to: email,
-        subject: 'Votre code de connexion - PPE',
-        html: `
-            <div style="font-family: sans-serif; padding: 20px; color: #333;">
-                <h2>Connexion Sécurisée</h2>
-                <p>Bonjour ${user.prenom},</p>
-                <p>Voici votre code de vérification à usage unique :</p>
-                <p style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #2563EB;">${code}</p>
-                <p>Ce code expire dans 10 minutes.</p>
-            </div>
-        `
+      from: 'securite@likeus.dev', // Ton domaine Resend
+      to: email,
+      subject: 'Code de vérification',
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; color: #333;">
+            <h2>Connexion Sécurisée</h2>
+            <p>Bonjour ${user.prenom},</p>
+            <p>Voici votre code de vérification à usage unique :</p>
+            <p style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #2563EB;">${code}</p>
+            <p>Ce code expire dans 10 minutes.</p>
+        </div>
+      `
     });
 
-    // 4. Dire au Frontend : "C'est bon, mais demande le code maintenant"
     return NextResponse.json({ 
         require2fa: true, 
-        email: user.email, 
-        
-        // 👇 AJOUT CRITIQUE : L'ID de l'employé est nécessaire pour le Dashboard
-        id_employe: user.id_employe
+        email: user.email,
+        id_employe: user.id_employe 
     });
 
-  } catch (error: any) {
-    console.error(error);
+  } catch (error) {
+    console.error("Login Error:", error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
 }

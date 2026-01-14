@@ -2,167 +2,198 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import AdminSidebar from "../components/AdminSidebar"; // Vérifie bien le chemin d'import
+import AdminSidebar from "../components/AdminSidebar"; 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+// 👇 IMPORTS LUCIDE
+import { 
+  Briefcase, Users, CalendarRange, DoorOpen, 
+  BarChart2, History, Loader2, TrendingUp 
+} from "lucide-react";
 
-export default function DashboardHome() {
+export default function AdminDashboard() {
   const [stats, setStats] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
   const router = useRouter();
 
   useEffect(() => {
-    // 1. Sécurité
     const storedUser = localStorage.getItem("user_info");
-    if (!storedUser) router.push("/login");
-    else {
+    if (!storedUser) {
+        router.push("/login"); 
+    } else {
       const u = JSON.parse(storedUser);
       setUser(u);
       if (u.role !== "ADMIN") router.push("/employe/dashboard");
     }
 
-    // 2. Charger les stats
     fetch("/api/stats")
       .then(res => res.json())
       .then(data => setStats(data))
       .catch(err => console.error(err));
   }, [router]);
 
+  // État de chargement avec un beau spinner centré
   if (!stats || !user) return (
-    <div className="min-h-screen ml-64 flex items-center justify-center text-blue-400 animate-pulse">
-        Chargement des données...
+    <div className="min-h-screen flex items-center justify-center bg-[#030712]">
+        <div className="flex flex-col items-center gap-4">
+            <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
+            <p className="text-blue-400 font-mono text-sm animate-pulse">Chargement des données...</p>
+        </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen text-gray-200">
+    <div className="min-h-screen text-gray-200 bg-[#030712]">
       <AdminSidebar />
       
-      {/* Ajout de ml-64 car la Sidebar est "fixed" */}
       <main className="ml-64 p-8 animate-fade-in">
         
-        {/* Header */}
-        <div className="mb-8 flex justify-between items-end">
-            <div>
-                <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
-                    Tableau de Bord
-                </h1>
-                <p className="text-gray-400 mt-2">
-                    Vue d'ensemble pour <span className="text-white font-bold">{user.prenom}</span> 🚀
-                </p>
-            </div>
-            <div className="text-xs text-gray-500 bg-black/20 px-3 py-1 rounded-full border border-white/5">
-                Dernière mise à jour : {new Date().toLocaleTimeString()}
-            </div>
+        {/* EN-TÊTE */}
+        <div className="mb-8">
+            <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
+                Tableau de Bord <span className="text-sm font-normal text-gray-500 bg-white/5 px-2 py-1 rounded-lg border border-white/10">v1.0</span>
+            </h1>
+            <p className="text-gray-400">
+                Ravi de vous revoir, <span className="text-blue-400 font-bold">{user.prenom}</span>. Voici ce qu'il se passe aujourd'hui.
+            </p>
         </div>
 
-        {/* --- CARTES KPI (CHIFFRES CLÉS) --- */}
+        {/* --- CARTES KPI --- */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           
-          <div className="glass-panel p-6 rounded-2xl border-l-4 border-l-blue-500 relative overflow-hidden group">
-            <div className="absolute right-0 top-0 p-4 opacity-10 text-6xl group-hover:scale-110 transition">📂</div>
-            <h3 className="text-blue-400 text-xs font-bold uppercase tracking-wider">Projets en cours</h3>
-            <p className="text-4xl font-bold text-white mt-2">{stats.projetsEnCours}</p>
+          {/* CARTE 1 : PROJETS */}
+          <div className="glass-panel p-6 rounded-2xl border-l-4 border-blue-500 relative overflow-hidden group hover:translate-y-[-2px] transition-all">
+            <div className="absolute right-4 top-4 p-3 bg-blue-500/10 rounded-xl text-blue-500 group-hover:scale-110 transition-transform">
+                <Briefcase className="w-6 h-6" />
+            </div>
+            <h3 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Projets Actifs</h3>
+            <p className="text-3xl font-bold text-white">{stats.projetsEnCours}</p>
+            <div className="mt-2 text-[10px] text-blue-300 flex items-center gap-1">
+                <TrendingUp className="w-3 h-3" /> En cours de développement
+            </div>
           </div>
 
-          <div className="glass-panel p-6 rounded-2xl border-l-4 border-l-purple-500 relative overflow-hidden group">
-            <div className="absolute right-0 top-0 p-4 opacity-10 text-6xl group-hover:scale-110 transition">👥</div>
-            <h3 className="text-purple-400 text-xs font-bold uppercase tracking-wider">Employés Total</h3>
-            <p className="text-4xl font-bold text-white mt-2">{stats.employes}</p>
+          {/* CARTE 2 : EMPLOYÉS */}
+          <div className="glass-panel p-6 rounded-2xl border-l-4 border-purple-500 relative overflow-hidden group hover:translate-y-[-2px] transition-all">
+            <div className="absolute right-4 top-4 p-3 bg-purple-500/10 rounded-xl text-purple-500 group-hover:scale-110 transition-transform">
+                <Users className="w-6 h-6" />
+            </div>
+            <h3 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Collaborateurs</h3>
+            <p className="text-3xl font-bold text-white">{stats.employes}</p>
+            <div className="mt-2 text-[10px] text-purple-300 flex items-center gap-1">
+                Effectif total enregistré
+            </div>
           </div>
 
-          <div className="glass-panel p-6 rounded-2xl border-l-4 border-l-green-500 relative overflow-hidden group">
-            <div className="absolute right-0 top-0 p-4 opacity-10 text-6xl group-hover:scale-110 transition">📅</div>
-            <h3 className="text-green-400 text-xs font-bold uppercase tracking-wider">Réservations (Futur)</h3>
-            <p className="text-4xl font-bold text-white mt-2">{stats.reservations}</p>
+          {/* CARTE 3 : RÉSERVATIONS */}
+          <div className="glass-panel p-6 rounded-2xl border-l-4 border-green-500 relative overflow-hidden group hover:translate-y-[-2px] transition-all">
+            <div className="absolute right-4 top-4 p-3 bg-green-500/10 rounded-xl text-green-500 group-hover:scale-110 transition-transform">
+                <CalendarRange className="w-6 h-6" />
+            </div>
+            <h3 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Réservations</h3>
+            <p className="text-3xl font-bold text-white">{stats.reservations}</p>
+            <div className="mt-2 text-[10px] text-green-300 flex items-center gap-1">
+                Prévues dans le futur
+            </div>
           </div>
 
-          <div className="glass-panel p-6 rounded-2xl border-l-4 border-l-orange-500 relative overflow-hidden group">
-            <div className="absolute right-0 top-0 p-4 opacity-10 text-6xl group-hover:scale-110 transition">🏢</div>
-            <h3 className="text-orange-400 text-xs font-bold uppercase tracking-wider">Salles gérées</h3>
-            <p className="text-4xl font-bold text-white mt-2">{stats.salles}</p>
+          {/* CARTE 4 : SALLES */}
+          <div className="glass-panel p-6 rounded-2xl border-l-4 border-orange-500 relative overflow-hidden group hover:translate-y-[-2px] transition-all">
+            <div className="absolute right-4 top-4 p-3 bg-orange-500/10 rounded-xl text-orange-500 group-hover:scale-110 transition-transform">
+                <DoorOpen className="w-6 h-6" />
+            </div>
+            <h3 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Salles & Labos</h3>
+            <p className="text-3xl font-bold text-white">{stats.salles}</p>
+            <div className="mt-2 text-[10px] text-orange-300 flex items-center gap-1">
+                Disponibles à la réservation
+            </div>
           </div>
 
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             
-            {/* --- GRAPHIQUE --- */}
-            <div className="glass-panel p-6 rounded-2xl h-96 flex flex-col">
-                <h3 className="text-white font-bold mb-6 flex items-center gap-2">
-                    📊 Occupation des salles <span className="text-xs font-normal text-gray-500">(7 prochains jours)</span>
-                </h3>
+            {/* GRAPHIQUE */}
+            <div className="glass-panel p-6 rounded-2xl h-96 flex flex-col border border-white/10 shadow-xl">
+                <div className="flex items-center gap-3 mb-6">
+                    <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400">
+                        <BarChart2 className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-white font-bold text-lg">Occupation des Salles</h3>
+                </div>
+                
                 <div className="flex-1 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={stats.chartData}>
-                            {/* Grille subtile */}
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.1)" />
-                            
-                            {/* Axes en gris clair */}
+                        <BarChart data={stats.chartData} barSize={32}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
                             <XAxis 
                                 dataKey="name" 
                                 axisLine={false} 
                                 tickLine={false} 
-                                tick={{ fill: '#9ca3af', fontSize: 12 }} 
-                                dy={10}
+                                tick={{fill: '#64748b', fontSize: 11}} 
+                                dy={10} 
                             />
                             <YAxis 
                                 axisLine={false} 
                                 tickLine={false} 
                                 allowDecimals={false} 
-                                tick={{ fill: '#9ca3af', fontSize: 12 }} 
+                                tick={{fill: '#64748b', fontSize: 11}} 
                             />
-                            
-                            {/* Tooltip sombre */}
                             <Tooltip 
                                 cursor={{fill: 'rgba(255,255,255,0.05)'}}
                                 contentStyle={{ 
-                                    backgroundColor: 'rgba(17, 25, 40, 0.9)', 
-                                    border: '1px solid rgba(255,255,255,0.1)', 
-                                    borderRadius: '8px',
-                                    color: '#fff'
+                                    backgroundColor: '#0f172a', 
+                                    borderColor: 'rgba(255,255,255,0.1)', 
+                                    color: '#fff',
+                                    borderRadius: '12px',
+                                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
                                 }}
                             />
-                            
-                            {/* Barres Néon */}
+                            {/* DÉGRADÉ SUR LES BARRES */}
+                            <defs>
+                                <linearGradient id="colorBar" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.9}/>
+                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                                </linearGradient>
+                            </defs>
                             <Bar 
                                 dataKey="reservations" 
-                                fill="#3B82F6" 
+                                fill="url(#colorBar)" 
                                 radius={[6, 6, 0, 0]} 
-                                barSize={50}
-                                className="hover:opacity-80 transition-opacity"
                             />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
             </div>
 
-            {/* --- TABLEAU DERNIERS PROJETS --- */}
-            <div className="glass-panel rounded-2xl overflow-hidden h-96 flex flex-col">
-                <div className="p-6 border-b border-white/10 bg-white/5">
-                    <h2 className="text-xl font-bold text-white">🚀 Derniers projets créés</h2>
+            {/* TABLEAU DERNIERS PROJETS */}
+            <div className="glass-panel rounded-2xl p-6 h-96 overflow-hidden flex flex-col border border-white/10 shadow-xl">
+                <div className="flex items-center gap-3 mb-6">
+                    <div className="p-2 bg-purple-500/20 rounded-lg text-purple-400">
+                        <History className="w-5 h-5" />
+                    </div>
+                    <h2 className="text-lg font-bold text-white">Derniers Projets Ajoutés</h2>
                 </div>
-                
-                <div className="overflow-y-auto custom-scrollbar flex-1 p-2">
+
+                <div className="overflow-y-auto custom-scrollbar flex-1 pr-2">
                     <table className="min-w-full text-left">
-                        <thead className="text-gray-500 text-xs uppercase sticky top-0 bg-[#0f172a] z-10">
-                            <tr>
-                                <th className="px-4 py-3">Nom du projet</th>
-                                <th className="px-4 py-3 text-right">Statut</th>
+                        <thead>
+                            <tr className="border-b border-white/5 text-gray-500 text-[10px] uppercase tracking-widest font-semibold">
+                                <th className="py-3 pl-2">Nom du projet</th>
+                                <th className="py-3 text-right">État</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
                             {stats.recents.map((proj: any) => (
                             <tr key={proj.id_projet} className="hover:bg-white/5 transition group">
-                                <td className="px-4 py-3">
-                                    <div className="font-medium text-gray-200 group-hover:text-blue-300 transition-colors">
-                                        {proj.nom_projet}
-                                    </div>
+                                <td className="py-3.5 pl-2 font-medium text-gray-200 text-sm flex items-center gap-3">
+                                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                    {proj.nom_projet}
                                 </td>
-                                <td className="px-4 py-3 text-right">
-                                    <span className={`px-2 py-1 rounded text-[10px] font-bold border ${
+                                <td className="py-3.5 text-right">
+                                    <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold border uppercase tracking-wide ${
                                         proj.statut === 'EN_COURS' 
-                                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' 
-                                        : 'bg-gray-700/50 text-gray-400 border-gray-600'
+                                        ? 'bg-blue-500/10 text-blue-300 border-blue-500/20' 
+                                        : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
                                     }`}>
                                         {proj.statut.replace('_', ' ')}
                                     </span>
@@ -173,7 +204,6 @@ export default function DashboardHome() {
                     </table>
                 </div>
             </div>
-
         </div>
       </main>
     </div>

@@ -4,15 +4,23 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { canManageEmployees } from "@/lib/permissions";
+// 👇 IMPORTS LUCIDE
+import { 
+  LayoutDashboard, Users, DoorOpen, CalendarRange, 
+  Briefcase, Box, AlertTriangle, ScrollText, LogOut, 
+  KeyRound, ShieldCheck 
+} from "lucide-react";
 
 export default function AdminSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [role, setRole] = useState("STAGIAIRE");
+  const [userPrenom, setUserPrenom] = useState("");
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem("user_info") || "{}");
     if (user.role) setRole(user.role);
+    if (user.prenom) setUserPrenom(user.prenom);
   }, []);
 
   const handleLogout = async () => {
@@ -23,56 +31,89 @@ export default function AdminSidebar() {
 
   const isActive = (path: string) => pathname === path;
 
+  // Configuration des liens avec icônes (Composants Lucide)
   const allLinks = [
-    { name: "Dashboard", path: "/admin/dashboard", icon: "📊", access: true },
-    { name: "Employés", path: "/admin/employes", icon: "👥", access: canManageEmployees(role) },
-    { name: "Salles", path: "/admin/salles", icon: "🏢", access: true },
-    
-    // 👇 CHEMIN CORRIGÉ ICI : /admin/reservation
-    { name: "Réservations", path: "/admin/reservations", icon: "📅", access: true },
-
-    { name: "Projets", path: "/admin/projets", icon: "🚀", access: true },
-    { name: "Ressources", path: "/admin/ressources", icon: "📦", access: true },
-    { name: "Incidents", path: "/admin/incidents", icon: "⚠️", access: true },
-    { name: "Historique", path: "/admin/historique", icon: "📜", access: role === "ADMIN" },
+    { name: "Dashboard", path: "/admin/dashboard", icon: LayoutDashboard, access: true },
+    { name: "Employés", path: "/admin/employes", icon: Users, access: canManageEmployees(role) },
+    { name: "Salles", path: "/admin/salles", icon: DoorOpen, access: true },
+    { name: "Réservations", path: "/admin/reservations", icon: CalendarRange, access: true },
+    { name: "Projets", path: "/admin/projets", icon: Briefcase, access: true },
+    { name: "Ressources", path: "/admin/ressources", icon: Box, access: true },
+    { name: "Incidents", path: "/admin/incidents", icon: AlertTriangle, access: true },
+    // 👇 Ajout du lien vers la page Demandes (Mots de passe)
+    { name: "Demandes MDP", path: "/admin/demandes", icon: KeyRound, access: canManageEmployees(role) },
+    { name: "Historique", path: "/admin/historique", icon: ScrollText, access: role === "ADMIN" },
   ];
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 glass-panel border-r border-white/10 flex flex-col z-50 bg-[#030712]/90">
+    <aside className="fixed left-0 top-0 h-screen w-64 glass-panel border-r border-white/10 flex flex-col z-50 bg-[#030712]">
       
-      {/* Header */}
+      {/* HEADER */}
       <div className="p-6 border-b border-white/10 flex items-center gap-3">
-        <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-blue-500/30">
-          N
+        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+          <ShieldCheck className="w-6 h-6" />
         </div>
         <div>
-            <h1 className="text-xl font-bold text-white tracking-wide">Nexus<span className="text-blue-400">Admin</span></h1>
-            <p className="text-[10px] text-gray-400 uppercase tracking-widest border border-white/10 rounded px-1 w-fit mt-1">{role}</p>
+            <h1 className="text-lg font-bold text-white tracking-wide leading-tight">
+                Nexus<span className="text-blue-400">Admin</span>
+            </h1>
+            <div className="flex items-center gap-1 mt-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                <p className="text-[10px] text-gray-400 uppercase tracking-widest font-medium">
+                    {role.replace("_", " ")}
+                </p>
+            </div>
         </div>
       </div>
 
-      {/* Nav */}
+      {/* NAVIGATION */}
       <nav className="flex-1 overflow-y-auto py-6 px-3 space-y-1 custom-scrollbar">
-        {allLinks.filter(l => l.access).map((link) => (
-          <Link 
-            key={link.path} 
-            href={link.path}
-            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${
-              isActive(link.path) 
-                ? "bg-blue-600/20 text-blue-400 border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.2)]" 
-                : "text-gray-400 hover:bg-white/5 hover:text-white"
-            }`}
-          >
-            <span className="text-xl group-hover:scale-110 transition-transform">{link.icon}</span>
-            <span className="font-medium">{link.name}</span>
-          </Link>
-        ))}
+        <div className="text-[10px] uppercase text-gray-600 font-bold px-4 mb-2 tracking-widest">
+            Menu Principal
+        </div>
+        
+        {allLinks.filter(l => l.access).map((link) => {
+          const Icon = link.icon; // On récupère le composant icône
+          const active = isActive(link.path);
+          
+          return (
+            <Link 
+              key={link.path} 
+              href={link.path}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group relative ${
+                active
+                  ? "bg-blue-600/10 text-blue-400 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]" 
+                  : "text-gray-400 hover:bg-white/5 hover:text-gray-200 border border-transparent"
+              }`}
+            >
+              <Icon className={`w-5 h-5 transition-transform group-hover:scale-110 ${active ? "text-blue-400" : "text-gray-500 group-hover:text-gray-300"}`} />
+              <span className="font-medium text-sm">{link.name}</span>
+              
+              {/* Petit indicateur actif à droite */}
+              {active && <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_5px_rgba(59,130,246,0.5)]"></div>}
+            </Link>
+          );
+        })}
       </nav>
 
-      {/* Footer */}
+      {/* FOOTER (Déconnexion) */}
       <div className="p-4 border-t border-white/10 bg-black/20">
-        <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 btn-neon-red py-2 rounded-lg text-sm font-bold">
-          <span>🚪</span> Déconnexion
+        <div className="mb-4 px-2 flex items-center gap-3">
+             <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 flex items-center justify-center text-xs font-bold text-white">
+                {userPrenom ? userPrenom[0] : "U"}
+             </div>
+             <div className="overflow-hidden">
+                <p className="text-sm text-white font-medium truncate">{userPrenom || "Utilisateur"}</p>
+                <p className="text-[10px] text-gray-500">Connecté</p>
+             </div>
+        </div>
+
+        <button 
+            onClick={handleLogout} 
+            className="w-full flex items-center justify-center gap-2 text-red-400 hover:text-white bg-red-500/10 hover:bg-red-500 border border-red-500/20 hover:border-red-500 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 group"
+        >
+          <LogOut className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+          Déconnexion
         </button>
       </div>
     </aside>

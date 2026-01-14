@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// GET : Récupérer le planning
+// GET : Récupérer toutes les réservations
 export async function GET() {
   try {
     const resas = await prisma.reservationSalle.findMany({
       include: {
-        salle: { select: { nom_salle: true, capacite: true } },
+        salle: { select: { nom_salle: true } },
         projet: { select: { nom_projet: true } }
       },
       orderBy: { date_debut: 'asc' }
@@ -17,53 +17,56 @@ export async function GET() {
   }
 }
 
-// POST : Créer une réservation (Avec vérification de conflit !)
+// POST : Créer une réservation
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { id_salle, id_projet, date_debut, date_fin, objet } = body;
+    const { id_employe, id_salle, id_projet, id_ressource, date_debut, date_fin, objet } = body;
 
-    // 1. Validation de base
-    if (!id_salle || !id_projet || !date_debut || !date_fin) {
-        return NextResponse.json({ error: "Tous les champs sont requis" }, { status: 400 });
+    if (!id_projet || !date_debut || !date_fin) {
+        return NextResponse.json({ error: "Le projet et les dates sont requis." }, { status: 400 });
     }
 
     const start = new Date(date_debut);
     const end = new Date(date_fin);
 
     if (start >= end) {
-        return NextResponse.json({ error: "La date de fin doit être après le début" }, { status: 400 });
+        return NextResponse.json({ error: "La date de fin doit être après le début." }, { status: 400 });
     }
 
-    // 2. Vérification de DISPONIBILITÉ (Chevauchement)
-    const conflit = await prisma.reservationSalle.findFirst({
-      where: {
-        id_salle: id_salle,
-        // Logique : (DebutA < FinB) ET (FinA > DebutB)
-        AND: [
-            { date_debut: { lt: end } },
-            { date_fin: { gt: start } }
-        ]
-      }
-    });
+    // A. SALLE : Vérification conflit
+    if (id_salle) {
+        const conflit = await prisma.reservationSalle.findFirst({
+          where: {
+            id_salle: id_salle,
+            AND: [{ date_debut: { lt: end } }, { date_fin: { gt: start } }]
+          }
+        });
 
-    if (conflit) {
-        return NextResponse.json({ error: "⚠️ Salle déjà réservée sur ce créneau !" }, { status: 409 });
+        if (conflit) return NextResponse.json({ error: "⚠️ Salle déjà réservée sur ce créneau !" }, { status: 409 });
+
+        await prisma.reservationSalle.create({
+          data: { id_salle, id_projet, date_debut: start, date_fin: end, objet: objet || "Réunion Projet", statut: "CONFIRMEE" }
+        });
     }
 
-    // 3. Création
-    const resa = await prisma.reservationSalle.create({
-      data: {
-        id_salle, 
-        id_projet, 
-        date_debut: start, 
-        date_fin: end, 
-        objet: objet || "Réunion",
-        statut: "CONFIRMEE"
-      }
-    });
+    // B. RESSOURCE : Mise à jour état
+    if (id_ressource) {
+        const ressource = await prisma.ressource.findUnique({ where: { id_ressource } });
+        if (!ressource || ressource.etat !== "DISPONIBLE") {
+            return NextResponse.json({ error: "Cet équipement n'est pas disponible." }, { status: 400 });
+        }
+        await prisma.ressource.update({ where: { id_ressource }, data: { etat: "EN_UTILISATION" } });
+    }
 
-    return NextResponse.json(resa);
+    // C. LOG
+    if (id_employe) {
+        await prisma.historiqueAction.create({
+            data: { action: "RESERVATION", details: `Projet ${id_projet}`, auteur: id_employe }
+        });
+    }
+
+    return NextResponse.json({ success: true, message: "Réservation effectuée !" });
 
   } catch (error) {
     console.error(error);
@@ -71,16 +74,42 @@ export async function POST(req: Request) {
   }
 }
 
-// DELETE : Annuler une réservation
-export async function DELETE(req: Request) {
+// PUT : Modifier une réservation existante
+export async function PUT(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-    if(!id) return NextResponse.json({error: "ID manquant"}, {status: 400});
+    const body = await req.json();
+    const { id_reservation, id_salle, date_debut, date_fin, objet } = body;
 
-    await prisma.reservationSalle.delete({ where: { id_reservation: id } });
-    return NextResponse.json({ success: true });
+    // 1. Vérifier existence
+    const oldResa = await prisma.reservationSalle.findUnique({ where: { id_reservation } });
+    if (!oldResa) return NextResponse.json({ error: "Réservation introuvable" }, { status: 404 });
+
+    const start = new Date(date_debut);
+    const end = new Date(date_fin);
+
+    // 2. Vérifier Conflit SALLE (en excluant la réservation actuelle !)
+    if (id_salle) {
+        const conflit = await prisma.reservationSalle.findFirst({
+          where: {
+            id_salle: id_salle,
+            id_reservation: { not: id_reservation }, // 👈 EXCLURE SOI-MÊME
+            AND: [{ date_debut: { lt: end } }, { date_fin: { gt: start } }]
+          }
+        });
+
+        if (conflit) return NextResponse.json({ error: "⚠️ Conflit : Salle prise sur ce créneau." }, { status: 409 });
+    }
+
+    // 3. Mise à jour
+    const updated = await prisma.reservationSalle.update({
+        where: { id_reservation },
+        data: { id_salle, date_debut: start, date_fin: end, objet }
+    });
+
+    return NextResponse.json(updated);
+
   } catch (error) {
-    return NextResponse.json({ error: "Erreur suppression" }, { status: 500 });
+    console.error("Erreur PUT:", error);
+    return NextResponse.json({ error: "Erreur modification" }, { status: 500 });
   }
 }

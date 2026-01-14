@@ -26,6 +26,8 @@ model Employe {
   prenom              String
   email               String    @unique
   mot_de_passe        String
+
+  doit_changer_mdp    Boolean   @default(false)
   
   // RÔLE : On garde une seule définition propre. Par défaut : DEVELOPPEUR
   role                Role      @default(DEVELOPPEUR)
