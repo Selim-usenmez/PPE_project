@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image"; // 👈 IMPORT DU COMPOSANT IMAGE
 import AdminSidebar from "../components/AdminSidebar"; 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-// 👇 IMPORTS LUCIDE
 import { 
   Briefcase, Users, CalendarRange, DoorOpen, 
   BarChart2, History, Loader2, TrendingUp 
@@ -31,7 +31,6 @@ export default function AdminDashboard() {
       .catch(err => console.error(err));
   }, [router]);
 
-  // État de chargement avec un beau spinner centré
   if (!stats || !user) return (
     <div className="min-h-screen flex items-center justify-center bg-[#030712]">
         <div className="flex flex-col items-center gap-4">
@@ -47,20 +46,41 @@ export default function AdminDashboard() {
       
       <main className="ml-64 p-8 animate-fade-in">
         
-        {/* EN-TÊTE */}
-        <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-                Tableau de Bord <span className="text-sm font-normal text-gray-500 bg-white/5 px-2 py-1 rounded-lg border border-white/10">v1.0</span>
-            </h1>
-            <p className="text-gray-400">
-                Ravi de vous revoir, <span className="text-blue-400 font-bold">{user.prenom}</span>. Voici ce qu'il se passe aujourd'hui.
-            </p>
+        {/* EN-TÊTE AVEC LOGO */}
+        <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+                <div className="flex items-center gap-4 mb-2">
+                    {/* 👇 LOGO INTÉGRÉ ICI */}
+                    <div className="relative w-14 h-14 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-center shadow-lg shadow-blue-500/10">
+                        <Image 
+                            src="/logo.png" 
+                            alt="NexusPharm Logo" 
+                            width={40} 
+                            height={40} 
+                            className="object-contain"
+                        />
+                    </div>
+                    
+                    <h1 className="text-3xl font-bold text-white flex flex-col">
+                        <span>Tableau de Bord</span>
+                        <span className="text-sm font-normal text-blue-400/80">NexusPharm Admin</span>
+                    </h1>
+                </div>
+                
+                <p className="text-gray-400 ml-1">
+                    Ravi de vous revoir, <span className="text-white font-bold">{user.prenom}</span>.
+                </p>
+            </div>
+
+            {/* Badge Version */}
+            <div className="text-xs font-mono text-gray-500 bg-white/5 px-3 py-1 rounded-full border border-white/10">
+                v1.0.0 • Stable
+            </div>
         </div>
 
         {/* --- CARTES KPI --- */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           
-          {/* CARTE 1 : PROJETS */}
           <div className="glass-panel p-6 rounded-2xl border-l-4 border-blue-500 relative overflow-hidden group hover:translate-y-[-2px] transition-all">
             <div className="absolute right-4 top-4 p-3 bg-blue-500/10 rounded-xl text-blue-500 group-hover:scale-110 transition-transform">
                 <Briefcase className="w-6 h-6" />
@@ -72,7 +92,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* CARTE 2 : EMPLOYÉS */}
           <div className="glass-panel p-6 rounded-2xl border-l-4 border-purple-500 relative overflow-hidden group hover:translate-y-[-2px] transition-all">
             <div className="absolute right-4 top-4 p-3 bg-purple-500/10 rounded-xl text-purple-500 group-hover:scale-110 transition-transform">
                 <Users className="w-6 h-6" />
@@ -84,7 +103,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* CARTE 3 : RÉSERVATIONS */}
           <div className="glass-panel p-6 rounded-2xl border-l-4 border-green-500 relative overflow-hidden group hover:translate-y-[-2px] transition-all">
             <div className="absolute right-4 top-4 p-3 bg-green-500/10 rounded-xl text-green-500 group-hover:scale-110 transition-transform">
                 <CalendarRange className="w-6 h-6" />
@@ -96,7 +114,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* CARTE 4 : SALLES */}
           <div className="glass-panel p-6 rounded-2xl border-l-4 border-orange-500 relative overflow-hidden group hover:translate-y-[-2px] transition-all">
             <div className="absolute right-4 top-4 p-3 bg-orange-500/10 rounded-xl text-orange-500 group-hover:scale-110 transition-transform">
                 <DoorOpen className="w-6 h-6" />
@@ -148,7 +165,6 @@ export default function AdminDashboard() {
                                     boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
                                 }}
                             />
-                            {/* DÉGRADÉ SUR LES BARRES */}
                             <defs>
                                 <linearGradient id="colorBar" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.9}/>

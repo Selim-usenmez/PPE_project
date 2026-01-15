@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image"; // 👈 Import pour l'image
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { canManageEmployees } from "@/lib/permissions";
@@ -8,7 +9,7 @@ import { canManageEmployees } from "@/lib/permissions";
 import { 
   LayoutDashboard, Users, DoorOpen, CalendarRange, 
   Briefcase, Box, AlertTriangle, ScrollText, LogOut, 
-  KeyRound, ShieldCheck 
+  KeyRound 
 } from "lucide-react";
 
 export default function AdminSidebar() {
@@ -31,7 +32,7 @@ export default function AdminSidebar() {
 
   const isActive = (path: string) => pathname === path;
 
-  // Configuration des liens avec icônes (Composants Lucide)
+  // Configuration des liens
   const allLinks = [
     { name: "Dashboard", path: "/admin/dashboard", icon: LayoutDashboard, access: true },
     { name: "Employés", path: "/admin/employes", icon: Users, access: canManageEmployees(role) },
@@ -40,7 +41,6 @@ export default function AdminSidebar() {
     { name: "Projets", path: "/admin/projets", icon: Briefcase, access: true },
     { name: "Ressources", path: "/admin/ressources", icon: Box, access: true },
     { name: "Incidents", path: "/admin/incidents", icon: AlertTriangle, access: true },
-    // 👇 Ajout du lien vers la page Demandes (Mots de passe)
     { name: "Demandes MDP", path: "/admin/demandes", icon: KeyRound, access: canManageEmployees(role) },
     { name: "Historique", path: "/admin/historique", icon: ScrollText, access: role === "ADMIN" },
   ];
@@ -48,18 +48,27 @@ export default function AdminSidebar() {
   return (
     <aside className="fixed left-0 top-0 h-screen w-64 glass-panel border-r border-white/10 flex flex-col z-50 bg-[#030712]">
       
-      {/* HEADER */}
+      {/* HEADER AVEC LOGO */}
       <div className="p-6 border-b border-white/10 flex items-center gap-3">
-        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-          <ShieldCheck className="w-6 h-6" />
+        
+        {/* 👇 C'EST ICI QUE J'AI MIS TON LOGO */}
+        <div className="relative h-10 w-10 flex-shrink-0">
+           <Image 
+             src="/logo.png"  // Assure-toi que l'image est bien dans public/logo.png (ou favicon.png)
+             alt="NexusPharm Logo" 
+             fill
+             className="object-contain"
+             priority
+           />
         </div>
-        <div>
-            <h1 className="text-lg font-bold text-white tracking-wide leading-tight">
+
+        <div className="overflow-hidden">
+            <h1 className="text-lg font-bold text-white tracking-wide leading-tight truncate">
                 Nexus<span className="text-blue-400">Admin</span>
             </h1>
             <div className="flex items-center gap-1 mt-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                <p className="text-[10px] text-gray-400 uppercase tracking-widest font-medium">
+                <p className="text-[10px] text-gray-400 uppercase tracking-widest font-medium truncate">
                     {role.replace("_", " ")}
                 </p>
             </div>
@@ -73,7 +82,7 @@ export default function AdminSidebar() {
         </div>
         
         {allLinks.filter(l => l.access).map((link) => {
-          const Icon = link.icon; // On récupère le composant icône
+          const Icon = link.icon;
           const active = isActive(link.path);
           
           return (
@@ -89,17 +98,16 @@ export default function AdminSidebar() {
               <Icon className={`w-5 h-5 transition-transform group-hover:scale-110 ${active ? "text-blue-400" : "text-gray-500 group-hover:text-gray-300"}`} />
               <span className="font-medium text-sm">{link.name}</span>
               
-              {/* Petit indicateur actif à droite */}
               {active && <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_5px_rgba(59,130,246,0.5)]"></div>}
             </Link>
           );
         })}
       </nav>
 
-      {/* FOOTER (Déconnexion) */}
+      {/* FOOTER (USER INFO & LOGOUT) */}
       <div className="p-4 border-t border-white/10 bg-black/20">
         <div className="mb-4 px-2 flex items-center gap-3">
-             <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 flex items-center justify-center text-xs font-bold text-white">
+             <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 flex items-center justify-center text-xs font-bold text-white shadow-inner">
                 {userPrenom ? userPrenom[0] : "U"}
              </div>
              <div className="overflow-hidden">

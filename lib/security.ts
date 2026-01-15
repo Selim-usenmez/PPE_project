@@ -19,7 +19,7 @@ export function genererMotDePasseFort(longueur = 12): string {
 }
 
 /**
- * 👇 C'EST CETTE FONCTION QUI MANQUAIT ET BLOQUAIT VERCEL
+ * 👇 C'EST CETTE FONCTION QUI MANQUE CHEZ TOI
  * Vérifie la solidité d'un mot de passe fourni par l'utilisateur.
  */
 export function validatePassword(password: string): string | null {
