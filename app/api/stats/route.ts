@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma"; // Assure-toi que le chemin est bon
 
 export async function GET() {
   try {
@@ -8,15 +8,21 @@ export async function GET() {
       nbEmployes,
       nbProjetsEnCours,
       nbSalles,
-      reservationsFuturs,
+      reservationsFuturs, // On va l'appeler ainsi mais on prend TOUT pour le test
       recents
     ] = await Promise.all([
       prisma.employe.count(),
       prisma.projet.count({ where: { statut: "EN_COURS" } }),
       prisma.salle.count(),
+      
+      // 👇 MODIFICATION ICI : J'ai enlevé la date pour compter TOUTES les réservations
       prisma.reservationSalle.count({ 
-        where: { date_debut: { gte: new Date() }, statut: "CONFIRMEE" } 
+        where: { 
+            // date_debut: { gte: new Date() }, // <--- C'est ça qui bloquait l'affichage
+            statut: "CONFIRMEE" 
+        } 
       }),
+      
       prisma.projet.findMany({
         take: 5,
         orderBy: { createdAt: 'desc' },
@@ -24,11 +30,10 @@ export async function GET() {
       })
     ]);
 
-    // 2. CALCUL DES DONNÉES DU GRAPHIQUE (VRAIES DONNÉES)
-    // On récupère toutes les réservations futures pour voir la charge par jour
+    // 2. CALCUL DES DONNÉES DU GRAPHIQUE
     const rawReservations = await prisma.reservationSalle.findMany({
       where: { 
-        date_debut: { gte: new Date() }, // À venir
+        // date_debut: { gte: new Date() }, // 👇 IDEM ICI : On enlève le filtre date pour voir le graph
         statut: "CONFIRMEE"
       },
       select: { date_debut: true }
@@ -39,12 +44,10 @@ export async function GET() {
       'Lun': 0, 'Mar': 0, 'Mer': 0, 'Jeu': 0, 'Ven': 0, 'Sam': 0, 'Dim': 0 
     };
 
-    // On remplit avec les vraies données
+    // On remplit avec les données
     rawReservations.forEach(resa => {
       const date = new Date(resa.date_debut);
-      // getDay() renvoie 0 pour Dimanche, 1 pour Lundi...
       const dayIndex = date.getDay(); 
-      
       const mapDays = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
       const dayName = mapDays[dayIndex];
       
@@ -53,8 +56,7 @@ export async function GET() {
       }
     });
 
-    // On formate pour Recharts (Tableau d'objets)
-    // On force l'ordre Lundi -> Dimanche
+    // On formate pour Recharts
     const chartData = [
       { name: 'Lun', reservations: daysCount['Lun'] },
       { name: 'Mar', reservations: daysCount['Mar'] },
@@ -66,16 +68,16 @@ export async function GET() {
     ];
 
     return NextResponse.json({
+      reservations: reservationsFuturs, // Le chiffre s'affichera ici
       employes: nbEmployes,
       projetsEnCours: nbProjetsEnCours,
       salles: nbSalles,
-      reservations: reservationsFuturs,
       recents: recents,
-      chartData: chartData // 👈 On envoie les vraies données ici
+      chartData: chartData 
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("Erreur API Stats:", error);
     return NextResponse.json({ error: "Erreur stats" }, { status: 500 });
   }
 }

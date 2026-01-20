@@ -2,19 +2,28 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image"; // 👈 IMPORT IMPORTANT POUR LE LOGO
+import Image from "next/image";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import frLocale from '@fullcalendar/core/locales/fr';
 import { toast } from "sonner";
-// 👇 IMPORTS LUCIDE
 import { 
-  LayoutDashboard, Settings, LogOut, Calendar, AlertTriangle, 
+  Settings, LogOut, Calendar, AlertTriangle, 
   Briefcase, Clock, MapPin, Loader2, Plus, Trash2, Edit3, X, 
-  ChevronRight, CalendarRange, FolderOpen
+  CalendarRange, FolderOpen, ShieldCheck 
 } from "lucide-react";
+
+// --- FORMATAGE DES DATES ---
+const formatForInput = (d: any) => {
+    if (!d) return "";
+    try {
+        const date = new Date(d);
+        const offset = date.getTimezoneOffset() * 60000;
+        return (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
+    } catch (e) { return ""; }
+};
 
 export default function EmployeDashboard() {
   const router = useRouter();
@@ -28,19 +37,35 @@ export default function EmployeDashboard() {
 
   // Modale
   const [showModal, setShowModal] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<any>(null);
   const [editMode, setEditMode] = useState(false);
 
-  // Initialisation
+  // État Lecture (Affichage)
+  const [displayEvent, setDisplayEvent] = useState({
+      title: "",
+      nom_salle: "",
+      nom_projet: "",
+      start: "",
+      end: ""
+  });
+
+  // État Modification (Formulaire)
+  const [formData, setFormData] = useState({
+      id: "",
+      objet: "",
+      start: "",
+      end: "",
+      id_salle: ""
+  });
+
   useEffect(() => {
     const stored = localStorage.getItem("user_info");
     if (!stored) { router.push("/login"); return; }
-    const userData = JSON.parse(stored);
-    
-    if (!userData?.id_employe) { router.push("/login"); return; }
-    
-    setUser(userData);
-    loadData(userData.id_employe);
+    try {
+        const userData = JSON.parse(stored);
+        if (!userData?.id_employe) { router.push("/login"); return; }
+        setUser(userData);
+        loadData(userData.id_employe);
+    } catch(e) { router.push("/login"); }
   }, [router]);
 
   const loadData = async (id: string) => {
@@ -54,24 +79,51 @@ export default function EmployeDashboard() {
         const res = await fetch(`/api/employes/${id}/planning`);
         if (res.ok) {
             const data = await res.json();
-            const formattedEvents = data.map((evt: any) => ({
-                ...evt,
-                id: evt.id_reservation || evt.id,
-                title: evt.objet || "Réunion", // Fallback titre
-                // Couleurs Pro
-                backgroundColor: 'rgba(59, 130, 246, 0.2)', 
-                borderColor: '#3b82f6',
-                textColor: '#ffffff',
-                // Props étendues
-                extendedProps: {
-                    salle: evt.salle,
-                    id_salle: evt.id_salle,
-                    projet: evt.projet,
-                    objet: evt.objet
+            
+            const formattedEvents = Array.isArray(data) ? data.map((evt: any) => {
+                
+                // --- LOGIQUE DE DÉCOUPAGE DU TITRE ---
+                // Le titre reçu est : "NomDuProjet - NomDeLaSalle"
+                // Exemple : "Acxouchement - Contrôle Qualité"
+                
+                let nomProjetFinal = evt.projet?.nom_projet || "Non spécifié";
+                let nomSalleFinal = evt.salle?.nom_salle || "Salle inconnue";
+                let objetFinal = evt.objet || evt.title;
+
+                // Si l'API n'a pas envoyé le projet mais qu'il y a un tiret dans le titre
+                if (!evt.projet && evt.title && evt.title.includes(" - ")) {
+                    const parties = evt.title.split(" - ");
+                    
+                    // Partie 1 (Gauche) = Le Projet (ex: Acxouchement)
+                    nomProjetFinal = parties[0].trim(); 
+                    objetFinal = parties[0].trim(); // On met aussi ça en objet pour l'affichage
+                    
+                    // Partie 2 (Droite) = La Salle (ex: Contrôle Qualité)
+                    if (parties.length > 1) {
+                        nomSalleFinal = parties[1].trim();
+                    }
                 }
-            }));
+
+                return {
+                    ...evt, 
+                    id: evt.id || evt.id_reservation,
+                    title: evt.title || objetFinal, 
+                    start: evt.start || evt.date_debut, 
+                    end: evt.end || evt.date_fin,
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)', 
+                    borderColor: '#3b82f6',
+                    textColor: '#ffffff',
+                    extendedProps: {
+                        objet: objetFinal,
+                        nom_salle: nomSalleFinal,
+                        nom_projet: nomProjetFinal, // 👈 C'est ici qu'on force l'affichage
+                        id_salle: evt.salle?.id_salle || evt.id_salle
+                    }
+                };
+            }) : [];
+            
             setEvents(formattedEvents);
-            setStats(prev => ({ ...prev, reservations: data.length }));
+            setStats(prev => ({ ...prev, reservations: formattedEvents.length }));
         }
     } catch (e) { console.error(e); }
   };
@@ -81,27 +133,36 @@ export default function EmployeDashboard() {
         const res = await fetch(`/api/employes/${id}/projets`); 
         if (res.ok) {
             const data = await res.json();
-            setMesProjets(data); 
-            setStats(prev => ({ ...prev, projets: data.length })); 
+            const safeData = Array.isArray(data) ? data : [];
+            setMesProjets(safeData); 
+            setStats(prev => ({ ...prev, projets: safeData.length })); 
         }
     } catch (e) { console.error(e); }
   };
 
-  // --- ACTIONS ---
+  // --- CLIC EVENT ---
   const handleEventClick = (clickInfo: any) => {
-      const props = clickInfo.event.extendedProps;
-      const eventObj = {
-          id: clickInfo.event.id,
-          title: clickInfo.event.title,
-          start: clickInfo.event.start,
-          end: clickInfo.event.end,
-          salle: props.salle, 
-          id_salle: props.id_salle, 
-          projet: props.projet,
-          objet: props.objet || clickInfo.event.title
-      };
+      const event = clickInfo.event;
+      const props = event.extendedProps;
       
-      setSelectedEvent(eventObj);
+      // 1. Données d'affichage (Lecture seule)
+      setDisplayEvent({
+          title: event.title,
+          start: event.start,
+          end: event.end || event.start,
+          nom_salle: props.nom_salle, 
+          nom_projet: props.nom_projet 
+      });
+
+      // 2. Données formulaire (Modification)
+      setFormData({
+          id: event.id,
+          objet: props.objet || event.title, // On essaie de récupérer l'objet brut
+          start: formatForInput(event.start),
+          end: formatForInput(event.end || event.start),
+          id_salle: props.id_salle
+      });
+      
       setEditMode(false);
       setShowModal(true);
   };
@@ -113,11 +174,11 @@ export default function EmployeDashboard() {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                  id_reservation: selectedEvent.id,
-                  id_salle: selectedEvent.id_salle, 
-                  date_debut: selectedEvent.start,
-                  date_fin: selectedEvent.end,
-                  objet: selectedEvent.objet
+                  id_reservation: formData.id,
+                  id_salle: formData.id_salle, 
+                  date_debut: new Date(formData.start).toISOString(),
+                  date_fin: new Date(formData.end).toISOString(),
+                  objet: formData.objet
               })
           });
 
@@ -134,7 +195,7 @@ export default function EmployeDashboard() {
   const handleDelete = async () => {
       if(!confirm("Annuler cette réservation ?")) return;
       try {
-          const res = await fetch(`/api/reservations/${selectedEvent.id}`, { method: "DELETE" });
+          const res = await fetch(`/api/reservations/${formData.id}`, { method: "DELETE" });
           if(res.ok) {
               toast.success("Réservation annulée");
               setShowModal(false);
@@ -154,7 +215,6 @@ export default function EmployeDashboard() {
   return (
     <div className="min-h-screen bg-[#030712] text-gray-200 p-6 md:p-10">
       
-      {/* CSS FullCalendar Dark Mode */}
       <style jsx global>{`
         .fc { font-family: ui-sans-serif, system-ui, sans-serif; color: #9ca3af; }
         .fc-toolbar-title { color: white; font-size: 1.25rem !important; font-weight: 700; }
@@ -173,18 +233,9 @@ export default function EmployeDashboard() {
         {/* HEADER */}
         <header className="flex flex-col md:flex-row justify-between items-center glass-panel p-6 rounded-2xl shadow-lg border border-white/5">
             <div className="flex items-center gap-4">
-                
-                {/* 👇 REMPLACEMENT DE L'ICÔNE PAR TON LOGO */}
                 <div className="relative h-12 w-12 flex-shrink-0">
-                    <Image 
-                        src="/logo.png" 
-                        alt="NexusPharm Logo"
-                        fill
-                        className="object-contain"
-                        priority
-                    />
+                    <Image src="/logo.png" alt="NexusPharm Logo" fill className="object-contain" priority />
                 </div>
-
                 <div>
                     <h1 className="text-2xl font-bold text-white">Espace Employé</h1>
                     <p className="text-gray-400 text-sm">
@@ -194,6 +245,15 @@ export default function EmployeDashboard() {
             </div>
             
             <div className="flex gap-3 mt-4 md:mt-0">
+                {/* 👇 BOUTON VUE ADMIN */}
+                {user.role === "ADMIN" && (
+                    <button 
+                        onClick={() => router.push('/admin/dashboard')}
+                        className="px-4 py-2 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 hover:bg-purple-600 hover:text-white transition text-sm font-bold flex items-center gap-2"
+                    >
+                        <ShieldCheck className="w-4 h-4" /> Vue Admin
+                    </button>
+                )}
                 <button onClick={() => router.push('/employe/profile')} className="px-4 py-2 rounded-xl border border-white/10 hover:bg-white/5 transition text-sm font-bold text-gray-300 flex items-center gap-2">
                     <Settings className="w-4 h-4" /> Profil
                 </button>
@@ -205,67 +265,46 @@ export default function EmployeDashboard() {
 
         {/* DASHBOARD GRID */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            
-            {/* KPI 1 : Projets */}
             <div className="glass-panel p-5 rounded-2xl border-l-4 border-blue-500 flex items-center justify-between group">
                 <div>
                     <p className="text-xs text-blue-400 font-bold uppercase tracking-wider mb-1">Mes Projets</p>
                     <p className="text-3xl font-bold text-white">{loading ? <Loader2 className="w-6 h-6 animate-spin"/> : stats.projets}</p>
                 </div>
-                <div className="p-3 bg-blue-500/10 rounded-xl text-blue-500 group-hover:scale-110 transition-transform">
-                    <Briefcase className="w-6 h-6" />
-                </div>
+                <div className="p-3 bg-blue-500/10 rounded-xl text-blue-500"><Briefcase className="w-6 h-6" /></div>
             </div>
-
-            {/* KPI 2 : Réunions */}
             <div className="glass-panel p-5 rounded-2xl border-l-4 border-purple-500 flex items-center justify-between group">
                 <div>
                     <p className="text-xs text-purple-400 font-bold uppercase tracking-wider mb-1">Réunions</p>
                     <p className="text-3xl font-bold text-white">{loading ? <Loader2 className="w-6 h-6 animate-spin"/> : stats.reservations}</p>
                 </div>
-                <div className="p-3 bg-purple-500/10 rounded-xl text-purple-500 group-hover:scale-110 transition-transform">
-                    <CalendarRange className="w-6 h-6" />
-                </div>
+                <div className="p-3 bg-purple-500/10 rounded-xl text-purple-500"><CalendarRange className="w-6 h-6" /></div>
             </div>
-
-            {/* ACTION 1 : Réserver */}
             <div onClick={() => router.push('/employe/reservations')} className="glass-panel p-1 rounded-2xl border border-white/10 hover:border-blue-500/50 cursor-pointer transition-all group relative overflow-hidden">
-                <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/5 transition-colors"></div>
                 <div className="h-full flex flex-col items-center justify-center p-4">
-                    <div className="mb-2 p-3 bg-white/5 rounded-full group-hover:bg-blue-500/20 text-gray-300 group-hover:text-blue-400 transition-colors">
-                        <Plus className="w-6 h-6" />
-                    </div>
-                    <span className="text-sm font-bold text-gray-300 group-hover:text-white">Réserver</span>
+                    <div className="mb-2 p-3 bg-white/5 rounded-full text-blue-400"><Plus className="w-6 h-6" /></div>
+                    <span className="text-sm font-bold text-gray-300">Réserver</span>
                 </div>
             </div>
-
-            {/* ACTION 2 : Incident */}
             <div onClick={() => router.push('/employe/incidents')} className="glass-panel p-1 rounded-2xl border border-white/10 hover:border-red-500/50 cursor-pointer transition-all group relative overflow-hidden">
-                <div className="absolute inset-0 bg-red-500/0 group-hover:bg-red-500/5 transition-colors"></div>
                 <div className="h-full flex flex-col items-center justify-center p-4">
-                    <div className="mb-2 p-3 bg-white/5 rounded-full group-hover:bg-red-500/20 text-gray-300 group-hover:text-red-400 transition-colors">
-                        <AlertTriangle className="w-6 h-6" />
-                    </div>
-                    <span className="text-sm font-bold text-gray-300 group-hover:text-white">Signaler un problème</span>
+                    <div className="mb-2 p-3 bg-white/5 rounded-full text-red-400"><AlertTriangle className="w-6 h-6" /></div>
+                    <span className="text-sm font-bold text-gray-300">Signaler</span>
                 </div>
             </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            {/* COLONNE GAUCHE : Projets */}
             <div className="lg:col-span-1 space-y-6">
                 <div className="glass-panel p-6 rounded-2xl border border-white/10 h-full">
                     <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                         <FolderOpen className="w-5 h-5 text-blue-400" /> Projets en cours
                     </h2>
-                    
                     {mesProjets.length > 0 ? (
                         <div className="space-y-4">
                             {mesProjets.map((p) => (
                                 <div key={p.id_projet} className="p-4 rounded-xl bg-white/5 border border-white/5 hover:border-blue-500/30 transition-all group">
                                     <div className="flex justify-between items-start mb-2">
-                                        <h3 className="font-bold text-blue-300 group-hover:text-blue-200 transition-colors">{p.nom_projet}</h3>
+                                        <h3 className="font-bold text-blue-300">{p.nom_projet}</h3>
                                         <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded text-gray-400">
                                             {new Date(p.date_fin).toLocaleDateString()}
                                         </span>
@@ -275,15 +314,11 @@ export default function EmployeDashboard() {
                             ))}
                         </div>
                     ) : (
-                        <div className="text-center py-10 text-gray-500">
-                            <FolderOpen className="w-10 h-10 mx-auto mb-2 opacity-20" />
-                            <p className="text-sm">Aucun projet assigné.</p>
-                        </div>
+                        <div className="text-center py-10 text-gray-500">Aucun projet assigné.</div>
                     )}
                 </div>
             </div>
 
-            {/* COLONNE DROITE : Calendrier */}
             <div className="lg:col-span-2">
                 <div className="glass-panel p-6 rounded-2xl shadow-xl border border-white/10 h-full">
                     <div className="flex justify-between items-center mb-6">
@@ -291,7 +326,6 @@ export default function EmployeDashboard() {
                             <Calendar className="w-5 h-5 text-purple-400" /> Mon Planning
                         </h2>
                     </div>
-                    
                     <div className="h-[600px] overflow-hidden rounded-xl border border-white/5 bg-[#0f172a]/50">
                         <FullCalendar
                             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
@@ -301,8 +335,8 @@ export default function EmployeDashboard() {
                             eventClick={handleEventClick}
                             nowIndicator={true}
                             allDaySlot={false}
-                            slotMinTime="08:00:00"
-                            slotMaxTime="20:00:00"
+                            slotMinTime="07:00:00"
+                            slotMaxTime="21:00:00"
                             height="100%"
                             headerToolbar={{
                                 left: 'prev,next today',
@@ -317,7 +351,7 @@ export default function EmployeDashboard() {
       </div>
 
       {/* MODALE DETAILS / EDIT */}
-      {showModal && selectedEvent && (
+      {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
             <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative">
                 
@@ -335,10 +369,10 @@ export default function EmployeDashboard() {
                         <label className="text-xs uppercase font-bold text-gray-500 mb-1.5 block">Objet</label>
                         {editMode ? (
                             <input type="text" className="glass-input w-full" 
-                                value={selectedEvent.objet} onChange={e => setSelectedEvent({...selectedEvent, objet: e.target.value})} />
+                                value={formData.objet} onChange={e => setFormData({...formData, objet: e.target.value})} />
                         ) : (
                             <div className="text-white font-medium text-lg flex items-center gap-2">
-                                {selectedEvent.objet}
+                                {displayEvent.title}
                             </div>
                         )}
                     </div>
@@ -347,10 +381,11 @@ export default function EmployeDashboard() {
                         <label className="text-xs uppercase font-bold text-gray-500 mb-1.5 block">Salle & Projet</label>
                         <div className="flex items-center gap-2 text-sm text-gray-300 bg-white/5 p-3 rounded-lg border border-white/5">
                             <MapPin className="w-4 h-4 text-blue-400" />
-                            <span className="font-bold">{selectedEvent.salle?.nom_salle || "Salle inconnue"}</span>
+                            {/* 👇 Utilisation sécurisée des données préparées */}
+                            <span className="font-bold">{displayEvent.nom_salle || "Non spécifié"}</span>
                             <span className="text-gray-600">|</span>
                             <Briefcase className="w-4 h-4 text-purple-400" />
-                            <span>{selectedEvent.projet?.nom_projet || "Aucun projet"}</span>
+                            <span>{displayEvent.nom_projet || "Non spécifié"}</span>
                         </div>
                     </div>
 
@@ -359,13 +394,12 @@ export default function EmployeDashboard() {
                             <label className="text-xs uppercase font-bold text-gray-500 mb-1.5 block">Début</label>
                             {editMode ? (
                                 <input type="datetime-local" className="glass-input w-full text-xs" 
-                                    value={new Date(selectedEvent.start).toISOString().slice(0, 16)}
-                                    onChange={e => setSelectedEvent({...selectedEvent, start: e.target.value})}
+                                    value={formData.start} onChange={e => setFormData({...formData, start: e.target.value})}
                                 />
                             ) : (
                                 <div className="text-gray-300 text-sm flex items-center gap-2">
                                     <Clock className="w-3 h-3 text-gray-500" />
-                                    {new Date(selectedEvent.start).toLocaleString()}
+                                    {displayEvent.start ? new Date(displayEvent.start).toLocaleString() : "-"}
                                 </div>
                             )}
                         </div>
@@ -373,13 +407,12 @@ export default function EmployeDashboard() {
                             <label className="text-xs uppercase font-bold text-gray-500 mb-1.5 block">Fin</label>
                             {editMode ? (
                                 <input type="datetime-local" className="glass-input w-full text-xs" 
-                                    value={new Date(selectedEvent.end).toISOString().slice(0, 16)}
-                                    onChange={e => setSelectedEvent({...selectedEvent, end: e.target.value})}
+                                    value={formData.end} onChange={e => setFormData({...formData, end: e.target.value})}
                                 />
                             ) : (
                                 <div className="text-gray-300 text-sm flex items-center gap-2">
                                     <Clock className="w-3 h-3 text-gray-500" />
-                                    {new Date(selectedEvent.end).toLocaleString()}
+                                    {displayEvent.end ? new Date(displayEvent.end).toLocaleString() : "-"}
                                 </div>
                             )}
                         </div>

@@ -1,15 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image"; // 👈 Import pour l'image
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { canManageEmployees } from "@/lib/permissions";
-// 👇 IMPORTS LUCIDE
+// 👇 IMPORTS LUCIDE (J'ai ajouté "Eye" pour le bouton vue employé)
 import { 
   LayoutDashboard, Users, DoorOpen, CalendarRange, 
   Briefcase, Box, AlertTriangle, ScrollText, LogOut, 
-  KeyRound 
+  KeyRound, Eye 
 } from "lucide-react";
 
 export default function AdminSidebar() {
@@ -50,11 +50,10 @@ export default function AdminSidebar() {
       
       {/* HEADER AVEC LOGO */}
       <div className="p-6 border-b border-white/10 flex items-center gap-3">
-        
-        {/* 👇 C'EST ICI QUE J'AI MIS TON LOGO */}
         <div className="relative h-10 w-10 flex-shrink-0">
+           {/* Assure-toi que logo.png est bien dans le dossier public/ */}
            <Image 
-             src="/logo.png"  // Assure-toi que l'image est bien dans public/logo.png (ou favicon.png)
+             src="/logo.png" 
              alt="NexusPharm Logo" 
              fill
              className="object-contain"
@@ -75,7 +74,7 @@ export default function AdminSidebar() {
         </div>
       </div>
 
-      {/* NAVIGATION */}
+      {/* NAVIGATION PRINCIPALE */}
       <nav className="flex-1 overflow-y-auto py-6 px-3 space-y-1 custom-scrollbar">
         <div className="text-[10px] uppercase text-gray-600 font-bold px-4 mb-2 tracking-widest">
             Menu Principal
@@ -104,8 +103,19 @@ export default function AdminSidebar() {
         })}
       </nav>
 
-      {/* FOOTER (USER INFO & LOGOUT) */}
+      {/* FOOTER (Switch View + User Info + Logout) */}
       <div className="p-4 border-t border-white/10 bg-black/20">
+        
+        {/* 👇 BOUTON SWITCH VUE EMPLOYÉ */}
+        <Link 
+            href="/employe/dashboard"
+            className="w-full flex items-center justify-center gap-2 mb-4 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white py-2.5 rounded-xl text-sm font-bold transition-all group"
+        >
+            <Eye className="w-4 h-4 group-hover:text-blue-400 transition-colors" />
+            <span>Vue Employé</span>
+        </Link>
+
+        {/* INFO UTILISATEUR */}
         <div className="mb-4 px-2 flex items-center gap-3">
              <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 flex items-center justify-center text-xs font-bold text-white shadow-inner">
                 {userPrenom ? userPrenom[0] : "U"}
@@ -116,6 +126,7 @@ export default function AdminSidebar() {
              </div>
         </div>
 
+        {/* BOUTON DÉCONNEXION */}
         <button 
             onClick={handleLogout} 
             className="w-full flex items-center justify-center gap-2 text-red-400 hover:text-white bg-red-500/10 hover:bg-red-500 border border-red-500/20 hover:border-red-500 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 group"
