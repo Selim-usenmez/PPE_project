@@ -14,7 +14,7 @@ export async function GET(req: Request) {
     const start = new Date(startStr);
     const end = new Date(endStr);
 
-    // On cherche TOUTES les réservations qui chevauchent ce créneau
+    // On cherche TOUTES les réservations qui chevauchent ce créneau..
     const conflicts = await prisma.reservationSalle.findMany({
       where: {
         AND: [
