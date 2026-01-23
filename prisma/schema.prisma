@@ -32,16 +32,13 @@ model Employe {
 
   doit_changer_mdp    Boolean   @default(false)
   
-  // RÔLE : On garde une seule définition propre. Par défaut : DEVELOPPEUR
   role                Role      @default(DEVELOPPEUR)
   
   couleur_fond        String    @default("#ffffff")
   
-  // Sécurité (2FA)
   twoFactorCode       String?
   twoFactorExpires    DateTime?
   
-  // Validité du compte
   date_debut_validite DateTime?
   date_fin_validite   DateTime?
 
@@ -53,8 +50,6 @@ model Employe {
   demandes_mdp        DemandeMdp[]
   ressources_empruntees Ressource[] @relation("Emprunt")
   signalements        Signalement[]
-
-  // ✅ Les 2 lignes qui manquaient pour que tout fonctionne :
   historique_actions  HistoriqueAction[]
   reservations        ReservationSalle[]
 
@@ -123,12 +118,15 @@ model Ressource {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  // Emprunt
+  // Emprunt (Emprunt longue durée / Assignation)
   id_emprunteur    String?
   emprunteur       Employe?      @relation("Emprunt", fields: [id_emprunteur], references: [id_employe], onDelete: SetNull)
 
   // Signalements (Pannes)
   signalements     Signalement[]
+
+  // 👇 AJOUTÉ : Pour les réservations courtes durées (calendrier)
+  reservations     ReservationSalle[]
 
   @@map("ressources")
 }
@@ -151,13 +149,21 @@ model Salle {
 model ReservationSalle {
   id_reservation String   @id @default(cuid())
   
-  // Relation avec Employé (Auteur de la résa)
+  // Auteur
   id_employe     String?  
   employe        Employe? @relation(fields: [id_employe], references: [id_employe])
 
-  // Salle et Projet optionnels
+  // Salle (Optionnel)
   id_salle       String?
+  salle          Salle?   @relation(fields: [id_salle], references: [id_salle], onDelete: Cascade)
+
+  // 👇 AJOUTÉ : Ressource/Matériel (Optionnel)
+  id_ressource   String?
+  ressource      Ressource? @relation(fields: [id_ressource], references: [id_ressource], onDelete: Cascade)
+
+  // Projet (Optionnel)
   id_projet      String?
+  projet         Projet?  @relation(fields: [id_projet], references: [id_projet], onDelete: Cascade)
   
   date_debut     DateTime
   date_fin       DateTime
@@ -166,9 +172,6 @@ model ReservationSalle {
   
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  
-  projet         Projet?  @relation(fields: [id_projet], references: [id_projet], onDelete: Cascade)
-  salle          Salle?   @relation(fields: [id_salle], references: [id_salle], onDelete: Cascade)
 
   @@map("reservation_salles")
 }

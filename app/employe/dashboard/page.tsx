@@ -60,42 +60,40 @@ export default function EmployeDashboard() {
     try {
         const userData = JSON.parse(stored);
         setUser(userData);
-        // Au premier chargement, on veut le loader (isBackground = false)
         loadData(userData.id_employe, false);
     } catch(e) { router.push("/login"); }
   }, [router]);
 
-  // 👇 CORRECTION ICI : Ajout du paramètre isBackground
+  // Chargement des données (supporte le mode silencieux)
   const loadData = async (userId: string, isBackground = false) => {
-    // Si c'est en arrière-plan (update), on NE met PAS le loading à true
-    // pour éviter que la modale ne se ferme.
     if (!isBackground) setLoading(true);
-    
     await Promise.all([ fetchReservations(userId), fetchProjets(userId) ]);
-    
     if (!isBackground) setLoading(false);
   };
 
+  // 👇 ICI LE CHANGEMENT : On passe le userId dans l'URL
   const fetchReservations = async (currentUserId: string) => {
     try {
-        const res = await fetch(`/api/reservations?refresh=${Date.now()}`, {
+        // On ajoute userId=${currentUserId} pour filtrer côté serveur
+        const res = await fetch(`/api/reservations?userId=${currentUserId}&refresh=${Date.now()}`, {
             cache: 'no-store'
         });
         
         if (res.ok) {
             const data = await res.json();
             const formattedEvents = Array.isArray(data) ? data.map((evt: any) => {
+                // Comme on filtre, isMine sera toujours true, mais on garde la logique
                 const isMine = evt.id_employe === currentUserId;
                 const auteurPrenom = evt.employe ? evt.employe.prenom : "?";
                 const auteurNom = evt.employe ? `${evt.employe.prenom} ${evt.employe.nom}` : "Inconnu";
 
                 return {
                     id: evt.id_reservation, 
-                    title: `${evt.objet} • ${auteurPrenom}`, 
+                    title: `${evt.objet}`, // Plus besoin d'afficher le nom de l'auteur si c'est QUE moi
                     start: evt.date_debut, 
                     end: evt.date_fin,
-                    backgroundColor: isMine ? '#3b82f6' : '#64748b', 
-                    borderColor: isMine ? '#2563eb' : '#475569',
+                    backgroundColor: '#3b82f6', // Toujours bleu car c'est mes réservations
+                    borderColor: '#2563eb',
                     textColor: '#ffffff',
                     extendedProps: {
                         objet: evt.objet,
@@ -155,10 +153,7 @@ export default function EmployeDashboard() {
       e.preventDefault();
       e.stopPropagation();
       
-      if(!formData.id) {
-          toast.error("Erreur technique : ID manquant");
-          return;
-      }
+      if(!formData.id) { toast.error("Erreur technique : ID manquant"); return; }
 
       try {
           const payload = {
@@ -178,7 +173,6 @@ export default function EmployeDashboard() {
           if(res.ok) {
               toast.success("Mise à jour réussie !");
               
-              // 1. Mise à jour immédiate de l'affichage local
               setDisplayEvent(prev => ({
                   ...prev,
                   title: formData.objet,
@@ -186,11 +180,8 @@ export default function EmployeDashboard() {
                   end: new Date(formData.end).toISOString()
               }));
 
-              // 2. Rechargement des données en mode SILENCIEUX (true)
-              // Cela empêche le loader d'apparaître et de fermer la modale
               await loadData(user.id_employe, true);
 
-              // 3. On reste sur la modale, en mode lecture
               setEditMode(false);
           } else { 
               const err = await res.json();
@@ -206,7 +197,7 @@ export default function EmployeDashboard() {
           if(res.ok) {
               toast.success("Réservation supprimée");
               setShowModal(false);
-              loadData(user.id_employe, false); // Là on peut recharger normalement
+              loadData(user.id_employe, false);
           } else { toast.error("Erreur suppression"); }
       } catch(err) { toast.error("Erreur serveur"); }
   };
@@ -277,7 +268,7 @@ export default function EmployeDashboard() {
             {/* CALENDRIER */}
             <div className="lg:col-span-2">
                 <div className="glass-panel p-6 rounded-2xl shadow-xl border border-white/10 h-full">
-                    <div className="flex justify-between items-center mb-6"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Calendar className="w-5 h-5 text-purple-400" /> Planning des Salles</h2></div>
+                    <div className="flex justify-between items-center mb-6"><h2 className="text-lg font-bold text-white flex items-center gap-2"><Calendar className="w-5 h-5 text-purple-400" /> Mon Planning Personnel</h2></div>
                     <div className="h-[600px] overflow-hidden rounded-xl border border-white/5 bg-[#0f172a]/50">
                         <FullCalendar
                             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
@@ -321,7 +312,7 @@ export default function EmployeDashboard() {
                     {editMode ? "Modifier" : "Détails"}
                 </h2>
 
-                <form className="space-y-5" onSubmit={(e) => e.preventDefault()}>
+                <form onSubmit={handleUpdate} className="space-y-5">
                     
                     {/* OBJET */}
                     <div>
@@ -333,13 +324,13 @@ export default function EmployeDashboard() {
                         )}
                     </div>
 
-                    {/* AUTEUR */}
+                    {/* AUTEUR (Toujours Moi maintenant) */}
                     {!editMode && (
                         <div className="bg-purple-500/10 p-3 rounded-lg border border-purple-500/20 flex items-center gap-3">
                             <div className="p-2 bg-purple-500/20 rounded-full text-purple-400"><User className="w-4 h-4" /></div>
                             <div>
                                 <p className="text-[10px] uppercase font-bold text-purple-300">Réservé par</p>
-                                <p className="text-sm font-bold text-white">{displayEvent.auteur}</p>
+                                <p className="text-sm font-bold text-white">Moi ({displayEvent.auteur})</p>
                             </div>
                         </div>
                     )}
@@ -368,22 +359,19 @@ export default function EmployeDashboard() {
                         </div>
                     </div>
 
-                    {/* ACTIONS rara ra */}
+                    {/* ACTIONS */}
                     <div className="flex gap-3 pt-6 border-t border-white/10 mt-2">
                         {editMode ? (
                             <>
                                 <button type="button" onClick={() => setEditMode(false)} className="flex-1 py-2.5 rounded-xl border border-white/10 text-gray-400 hover:text-white transition text-sm">Annuler</button>
-                                <button type="button" onClick={handleUpdate} className="flex-1 btn-neon-blue py-2.5 rounded-xl font-bold text-white text-sm">Sauvegarder</button>
+                                <button type="submit" className="flex-1 btn-neon-blue py-2.5 rounded-xl font-bold text-white text-sm">Sauvegarder</button>
                             </>
                         ) : (
-                            displayEvent.isMine ? (
-                                <>
-                                    <button type="button" onClick={handleDelete} className="px-4 py-2.5 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition text-sm flex items-center gap-2"><Trash2 className="w-4 h-4" /> Supprimer</button>
-                                    <button type="button" onClick={() => setEditMode(true)} className="flex-1 btn-neon-blue py-2.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2"><Edit3 className="w-4 h-4" /> Modifier</button>
-                                </>
-                            ) : (
-                                <p className="text-xs text-gray-500 w-full text-center italic">Lecture seule (Ce n'est pas votre réservation)</p>
-                            )
+                            // On a forcément les droits sur ses propres événements
+                            <>
+                                <button type="button" onClick={handleDelete} className="px-4 py-2.5 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition text-sm flex items-center gap-2"><Trash2 className="w-4 h-4" /> Supprimer</button>
+                                <button type="button" onClick={() => setEditMode(true)} className="flex-1 btn-neon-blue py-2.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2"><Edit3 className="w-4 h-4" /> Modifier</button>
+                            </>
                         )}
                     </div>
                 </form>

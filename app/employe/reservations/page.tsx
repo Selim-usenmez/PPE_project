@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-// 👇 IMPORTS LUCIDE
 import { 
   CalendarRange, ArrowLeft, MapPin, Briefcase, 
   FileText, Clock, Save, Loader2, CalendarX, 
@@ -14,12 +13,16 @@ import {
 export default function EmployeReservationsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [checking, setChecking] = useState(false); // État de vérification
   
   // Données
   const [salles, setSalles] = useState<any[]>([]);
   const [ressources, setRessources] = useState<any[]>([]); 
   const [mesProjets, setMesProjets] = useState<any[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
+
+  // 👇 NOUVEAU : Stockage des IDs occupés
+  const [occupied, setOccupied] = useState<{ rooms: string[], resources: string[] }>({ rooms: [], resources: [] });
 
   // Formulaire
   const [form, setForm] = useState({
@@ -31,7 +34,7 @@ export default function EmployeReservationsPage() {
     objet: ""
   });
 
-  // Chargement des données
+  // Chargement initial
   useEffect(() => {
     const initData = async () => {
       const stored = localStorage.getItem("user_info");
@@ -51,7 +54,6 @@ export default function EmployeReservationsPage() {
         setMesProjets(Array.isArray(resProjets) ? resProjets : []);
         setReservations(resResas);
         
-        // Pré-sélection intelligente
         if (Array.isArray(resProjets) && resProjets.length > 0) {
             setForm(f => ({ ...f, id_projet: resProjets[0].id_projet }));
         }
@@ -65,7 +67,50 @@ export default function EmployeReservationsPage() {
     initData();
   }, [router]);
 
-  // Soumission
+  // 👇 VÉRIFICATION TEMPS RÉEL
+  useEffect(() => {
+    const checkAvailability = async () => {
+        if (!form.date_debut || !form.date_fin) return;
+        
+        const start = new Date(form.date_debut);
+        const end = new Date(form.date_fin);
+
+        if (start >= end) return; // Pas de check si dates incohérentes
+
+        setChecking(true);
+        try {
+            const res = await fetch(`/api/reservations/check?start=${form.date_debut}&end=${form.date_fin}`);
+            if (res.ok) {
+                const data = await res.json();
+                setOccupied({ 
+                    rooms: data.occupiedRooms || [], 
+                    resources: data.occupiedResources || [] 
+                });
+                
+                // Si l'élément sélectionné devient occupé, on le désélectionne ou on avertit
+                if (form.id_salle && data.occupiedRooms.includes(form.id_salle)) {
+                    toast.warning("La salle sélectionnée n'est plus disponible sur ce créneau.");
+                    setForm(f => ({...f, id_salle: ""}));
+                }
+                if (form.id_ressource && data.occupiedResources.includes(form.id_ressource)) {
+                    toast.warning("L'équipement sélectionné est déjà pris.");
+                    setForm(f => ({...f, id_ressource: ""}));
+                }
+            }
+        } catch (error) {
+            console.error("Erreur check", error);
+        } finally {
+            setChecking(false);
+        }
+    };
+
+    // Petit délai pour ne pas spammer l'API quand on tape
+    const timeout = setTimeout(checkAvailability, 500);
+    return () => clearTimeout(timeout);
+
+  }, [form.date_debut, form.date_fin]);
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -100,16 +145,8 @@ export default function EmployeReservationsPage() {
 
         if (res.ok) {
             toast.success("Réservation validée !");
-            
-            // Rafraîchir
-            const [newResas, newRessources] = await Promise.all([
-                fetch("/api/reservations").then(r => r.json()),
-                fetch("/api/ressources?etat=DISPONIBLE").then(r => r.json())
-            ]);
-            
-            setReservations(newResas);
-            setRessources(newRessources);
-            setForm(f => ({ ...f, objet: "", id_ressource: "" })); 
+            // Reload page ou data
+            window.location.reload(); 
         } else {
             toast.error(data.error || "Erreur lors de la réservation");
         }
@@ -118,10 +155,7 @@ export default function EmployeReservationsPage() {
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-[#030712]">
-        <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
-            <p className="text-blue-400 animate-pulse font-mono text-sm">Chargement...</p>
-        </div>
+        <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
     </div>
   );
 
@@ -137,12 +171,11 @@ export default function EmployeReservationsPage() {
                 </div>
                 <div>
                     <h1 className="text-2xl font-bold text-white">Réservation & Emprunt</h1>
-                    <p className="text-gray-400 text-sm">Réservez une salle ou empruntez du matériel.</p>
+                    <p className="text-gray-400 text-sm">Vérifiez la disponibilité en temps réel.</p>
                 </div>
             </div>
             <Link href="/employe/dashboard" className="mt-4 md:mt-0 px-5 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition text-sm font-bold flex items-center gap-2 group text-gray-300 hover:text-white">
-                <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> 
-                Retour Dashboard
+                <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Retour Dashboard
             </Link>
         </div>
 
@@ -157,58 +190,7 @@ export default function EmployeReservationsPage() {
                     
                     <form onSubmit={handleSubmit} className="space-y-5">
                         
-                        {/* Choix du Projet */}
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block ml-1">Projet concerné *</label>
-                            <div className="relative">
-                                <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                                <select 
-                                    className="glass-input w-full pl-9 cursor-pointer appearance-none bg-[#0f172a]" 
-                                    value={form.id_projet} 
-                                    onChange={e => setForm({...form, id_projet: e.target.value})}
-                                    required
-                                >
-                                    <option value="">-- Sélectionner un projet --</option>
-                                    {mesProjets.map(p => (
-                                        <option key={p.id_projet} value={p.id_projet}>{p.nom_projet}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            {mesProjets.length === 0 && <p className="text-xs text-red-400 mt-2 flex items-center gap-1"><Loader2 className="w-3 h-3" /> Aucun projet affilié.</p>}
-                        </div>
-
-                        {/* Choix Salle */}
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block ml-1">Salle (Optionnel)</label>
-                            <div className="relative">
-                                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                                <select className="glass-input w-full pl-9 cursor-pointer appearance-none bg-[#0f172a]" 
-                                    value={form.id_salle} onChange={e => setForm({...form, id_salle: e.target.value})}>
-                                    <option value="">-- Aucune --</option>
-                                    {salles.map(s => <option key={s.id_salle} value={s.id_salle}>{s.nom_salle} ({s.capacite}p)</option>)}
-                                </select>
-                            </div>
-                        </div>
-
-                        {/* Choix Matériel */}
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block ml-1">Matériel (Optionnel)</label>
-                            <div className="relative">
-                                <Box className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                                <select className="glass-input w-full pl-9 cursor-pointer appearance-none bg-[#0f172a]" 
-                                    value={form.id_ressource} onChange={e => setForm({...form, id_ressource: e.target.value})}>
-                                    <option value="">-- Aucun --</option>
-                                    {ressources.map(r => (
-                                        <option key={r.id_ressource} value={r.id_ressource}>
-                                            {r.nom_ressource} ({r.type.replace('_',' ')})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                            <p className="text-[10px] text-blue-300/60 mt-1 italic ml-1">Seuls les équipements disponibles sont listés.</p>
-                        </div>
-
-                        {/* Dates */}
+                        {/* DATES (En premier pour activer le check) */}
                         <div className="grid grid-cols-1 gap-4 bg-white/5 p-4 rounded-xl border border-white/5">
                             <div>
                                 <label className="flex items-center gap-2 text-[10px] font-bold text-blue-300 uppercase tracking-widest mb-2">
@@ -226,32 +208,112 @@ export default function EmployeReservationsPage() {
                             </div>
                         </div>
 
+                        {/* PROJET */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block ml-1">Projet</label>
+                            <div className="relative">
+                                <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                                <select className="glass-input w-full pl-9 bg-[#0f172a]" 
+                                    value={form.id_projet} onChange={e => setForm({...form, id_projet: e.target.value})} required>
+                                    <option value="">-- Projet --</option>
+                                    {mesProjets.map(p => <option key={p.id_projet} value={p.id_projet}>{p.nom_projet}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* SALLE (Avec Feedback visuel) */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block ml-1 flex justify-between">
+                                Salle
+                                {checking && <span className="text-blue-400 animate-pulse text-[10px]">Vérification...</span>}
+                            </label>
+                            <div className="relative">
+                                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                                <select 
+                                    className="glass-input w-full pl-9 bg-[#0f172a]" 
+                                    value={form.id_salle} 
+                                    onChange={e => setForm({...form, id_salle: e.target.value})}
+                                    disabled={!form.date_debut || !form.date_fin}
+                                >
+                                    <option value="">-- Aucune --</option>
+                                    {salles.map(s => {
+                                        // Est-ce occupé ?
+                                        const isOccupied = occupied.rooms.includes(s.id_salle);
+                                        return (
+                                            <option 
+                                                key={s.id_salle} 
+                                                value={s.id_salle} 
+                                                disabled={isOccupied}
+                                                className={isOccupied ? "text-gray-500 bg-red-900/20" : "text-white"}
+                                            >
+                                                {s.nom_salle} {isOccupied ? "🔴 (Occupé)" : `✅ (${s.capacite}p)`}
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+                            {(!form.date_debut || !form.date_fin) && <p className="text-[10px] text-yellow-500 mt-1 ml-1">Sélectionnez les dates pour voir les dispos.</p>}
+                        </div>
+
+                        {/* MATÉRIEL (Avec Feedback visuel) */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block ml-1 flex justify-between">
+                                Matériel
+                                {checking && <span className="text-blue-400 animate-pulse text-[10px]">Vérification...</span>}
+                            </label>
+                            <div className="relative">
+                                <Box className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                                <select 
+                                    className="glass-input w-full pl-9 bg-[#0f172a]" 
+                                    value={form.id_ressource} 
+                                    onChange={e => setForm({...form, id_ressource: e.target.value})}
+                                    disabled={!form.date_debut || !form.date_fin}
+                                >
+                                    <option value="">-- Aucun --</option>
+                                    {ressources.map(r => {
+                                        // Est-ce occupé ?
+                                        const isOccupied = occupied.resources.includes(r.id_ressource);
+                                        return (
+                                            <option 
+                                                key={r.id_ressource} 
+                                                value={r.id_ressource}
+                                                disabled={isOccupied}
+                                                className={isOccupied ? "text-gray-500 bg-red-900/20" : "text-white"}
+                                            >
+                                                {r.nom_ressource} {isOccupied ? "🔴 (Pris)" : "✅ (Dispo)"}
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* MOTIF */}
                         <div>
                             <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block ml-1">Motif</label>
                             <div className="relative">
                                 <FileText className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                                <input type="text" className="glass-input w-full pl-9 placeholder-gray-600" placeholder="Ex: Besoin microscope" 
+                                <input type="text" className="glass-input w-full pl-9 placeholder-gray-600" placeholder="Ex: Réunion client" 
                                     value={form.objet} onChange={e => setForm({...form, objet: e.target.value})} />
                             </div>
                         </div>
 
                         <button type="submit" 
-                            disabled={mesProjets.length === 0}
+                            disabled={mesProjets.length === 0 || checking}
                             className="w-full btn-neon-blue py-3 rounded-xl font-bold mt-4 shadow-lg flex items-center justify-center gap-2 text-white disabled:opacity-50 disabled:cursor-not-allowed">
-                            <Save className="w-4 h-4" /> Confirmer la demande
+                            {checking ? <Loader2 className="animate-spin w-4 h-4" /> : <Save className="w-4 h-4" />} Confirmer la demande
                         </button>
                     </form>
                 </div>
             </div>
 
-            {/* --- LISTE DES RÉSERVATIONS ACTUELLES --- */}
+            {/* --- LISTE --- */}
             <div className="lg:col-span-2">
                 <div className="glass-panel rounded-2xl overflow-hidden min-h-[600px] flex flex-col border border-white/10 shadow-xl">
                     <div className="p-6 border-b border-white/10 bg-white/[0.02] flex items-center justify-between">
                         <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                            <CalendarRange className="w-5 h-5 text-purple-400" /> Planning des Salles
+                            <CalendarRange className="w-5 h-5 text-purple-400" /> Mes Réservations
                         </h2>
-                        <span className="text-xs bg-white/10 px-2 py-1 rounded text-gray-400 font-bold">{reservations.length} actifs</span>
                     </div>
                     
                     {reservations.length === 0 ? (
@@ -264,7 +326,6 @@ export default function EmployeReservationsPage() {
                             {reservations.map(res => (
                                 <div key={res.id_reservation} className="p-5 hover:bg-white/5 transition flex justify-between items-center group relative">
                                     <div className="flex items-center gap-5">
-                                        {/* Date Box */}
                                         <div className="flex flex-col items-center justify-center bg-[#0f172a] border border-white/10 rounded-xl w-16 h-16 shadow-inner shrink-0">
                                             <div className="text-[10px] text-blue-400 uppercase font-bold tracking-wide">
                                                 {new Date(res.date_debut).toLocaleDateString('fr-FR', {weekday: 'short'})}
@@ -279,10 +340,11 @@ export default function EmployeReservationsPage() {
                                                 <span className="font-bold text-white text-base">
                                                     {res.salle ? res.salle.nom_salle : res.ressource ? res.ressource.nom_ressource : "Réservation"}
                                                 </span>
-                                                <span className="text-[9px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20 uppercase font-bold flex items-center gap-1">
-                                                    <Briefcase className="w-3 h-3" />
-                                                    {res.projet?.nom_projet}
-                                                </span>
+                                                {res.projet && (
+                                                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20 uppercase font-bold flex items-center gap-1">
+                                                        <Briefcase className="w-3 h-3" /> {res.projet.nom_projet}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="text-xs text-gray-400 flex flex-wrap items-center gap-2 font-mono">
                                                 <span className="text-blue-200">{new Date(res.date_debut).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
