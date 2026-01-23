@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createLog } from "@/lib/logger";
+import { createLog } from "@/lib/logger"; // 👈 Import
 
 // POST : Créer un signalement
 export async function POST(req: Request) {
@@ -22,10 +22,13 @@ export async function POST(req: Request) {
       }
     });
 
-    // 2. Optionnel : On peut passer la ressource en "EN_MAINTENANCE" automatiquement
-    // Pour l'instant on laisse l'admin décider, mais on loggue l'action.
-
-    await createLog("SIGNALEMENT_INCIDENT", `Incident signalé sur la ressource ID ${id_ressource}`);
+    // 2. ✅ LOG INCIDENT
+    // On passe l'ID de l'employé qui signale
+    await createLog(
+        "SIGNALEMENT_INCIDENT", 
+        `Signalement sur ressource ID: ${id_ressource}. Motif: ${description}`, 
+        id_employe
+    );
 
     return NextResponse.json(signalement, { status: 201 });
 
@@ -34,7 +37,7 @@ export async function POST(req: Request) {
   }
 }
 
-// GET : Lister les signalements (Pour l'admin plus tard)
+// GET : Lister les signalements
 export async function GET() {
   try {
     const list = await prisma.signalement.findMany({

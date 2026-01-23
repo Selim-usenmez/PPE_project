@@ -3,12 +3,12 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { Resend } from 'resend';
 import { cookies } from "next/headers";
+import { createLog } from "@/lib/logger"; // 👈 Import Logger
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    // 👇 On récupère 'rememberMe'
     const { email, password, rememberMe } = await req.json();
 
     console.log(`Tentative connexion pour: ${email}`);
@@ -43,9 +43,11 @@ export async function POST(req: Request) {
             email: user.email 
         };
 
+        // ✅ LOG CONNEXION RÉUSSIE
+        await createLog("CONNEXION", "Connexion via mot de passe (Device reconnu)", user.id_employe);
+
         const response = NextResponse.json({ success: true, ...sessionData });
 
-        // 👇 LOGIQUE 30 JOURS OU 24 HEURES
         const oneDay = 24 * 60 * 60;
         const thirtyDays = 30 * 24 * 60 * 60;
         const duration = rememberMe ? thirtyDays : oneDay;
@@ -54,7 +56,7 @@ export async function POST(req: Request) {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production", 
             sameSite: "lax",
-            maxAge: duration, // 👈 Durée dynamique
+            maxAge: duration,
             path: "/",
         });
 
@@ -76,6 +78,9 @@ export async function POST(req: Request) {
       subject: 'Code de vérification',
       html: `<p>Votre code de connexion : <strong>${code}</strong></p>`
     });
+
+    // On loggue l'envoi du code (Optionnel)
+    await createLog("CONNEXION_2FA_SENT", "Code envoyé par email", user.id_employe);
 
     return NextResponse.json({ require2fa: true, email: user.email });
 

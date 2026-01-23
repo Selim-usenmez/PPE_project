@@ -10,8 +10,11 @@ export async function POST() {
       try {
           const user = JSON.parse(session.value);
           // ✅ AJOUT DU LOG
-          await createLog("DÉCONNEXION", user.id_employe, "Déconnexion manuelle");
-      } catch(e) {}
+          // On passe explicitement l'ID pour être sûr
+          await createLog("DÉCONNEXION", "Déconnexion manuelle utilisateur", user.id_employe);
+      } catch(e) {
+          console.error("Erreur lecture session logout", e);
+      }
   }
 
   cookieStore.delete("session_user");

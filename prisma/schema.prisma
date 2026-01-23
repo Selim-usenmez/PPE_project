@@ -8,22 +8,7 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// --- MODÈLES ---
-
-model HistoriqueAction {
-  id_action String   @id @default(cuid())
-  action    String   // Ex: "CRÉATION_PROJET"
-  details   String?  // Ex: "Nom du projet : Alpha"
-  auteur    String   // Ex: "Jean Dupont"
-  createdAt DateTime @default(now())
-
-  // ✅ Relation pour afficher le nom dans les logs
-  employe   Employe? @relation(fields: [auteur], references: [id_employe])
-
-  @@map("historique_actions")
-}
-
-// 👇 NOUVEAU MODÈLE POUR L'IA
+// --- LOGS IA (QUOTAS) ---
 model AiLog {
   id         String   @id @default(cuid())
   createdAt  DateTime @default(now())
@@ -31,60 +16,59 @@ model AiLog {
   id_employe String
   employe    Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
   
-  prompt     String?  // On sauvegarde ce que l'utilisateur a demandé
+  prompt     String?  // Historique de la demande
 
   @@index([id_employe])
   @@map("ai_logs")
 }
 
+// --- UTILISATEURS ---
 model Employe {
   id_employe          String    @id @default(cuid())
   nom                 String
   prenom              String
   email               String    @unique
   mot_de_passe        String
-
   doit_changer_mdp    Boolean   @default(false)
-  
   role                Role      @default(DEVELOPPEUR)
-  
   couleur_fond        String    @default("#ffffff")
-  
   twoFactorCode       String?
   twoFactorExpires    DateTime?
-  
   date_debut_validite DateTime?
   date_fin_validite   DateTime?
-
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  // RELATIONS
   participations      ParticipationProjet[]
   demandes_mdp        DemandeMdp[]
   ressources_empruntees Ressource[] @relation("Emprunt")
   signalements        Signalement[]
   historique_actions  HistoriqueAction[]
   reservations        ReservationSalle[]
-  
-  // 👇 NOUVELLE RELATION POUR L'IA
   historique_ia       AiLog[]
 
   @@map("employes")
 }
 
+// --- AUTRES MODÈLES ---
+model HistoriqueAction {
+  id_action String   @id @default(cuid())
+  action    String
+  details   String?
+  auteur    String
+  createdAt DateTime @default(now())
+  employe   Employe? @relation(fields: [auteur], references: [id_employe])
+  @@map("historique_actions")
+}
+
 model DemandeMdp {
   id_demande String   @id @default(cuid())
-  id_employe String   // Clé étrangère simple
-  
+  id_employe String
   statut     String   @default("EN_ATTENTE")
   createdAt  DateTime @default(now())
-
   token      String?  @unique
   expiresAt  DateTime?
-
   employe    Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
-
   @@map("demandes_mdp")
 }
 
@@ -94,14 +78,11 @@ model Projet {
   description    String?
   date_debut     DateTime
   date_fin       DateTime?
-  statut         StatutProjet           @default(EN_COURS)
-  
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
-  
+  statut         StatutProjet @default(EN_COURS)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   participations ParticipationProjet[]
   reservations   ReservationSalle[]
-
   @@map("projets")
 }
 
@@ -110,14 +91,11 @@ model ParticipationProjet {
   id_employe       String
   id_projet        String
   date_assignation DateTime @default(now())
-  role_dans_projet String?  // Ex: "Lead Dev", "Testeur"...
-  
+  role_dans_projet String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-  
   employe          Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
   projet           Projet   @relation(fields: [id_projet], references: [id_projet], onDelete: Cascade)
-
   @@unique([id_employe, id_projet])
   @@map("participation_projets")
 }
@@ -131,20 +109,12 @@ model Ressource {
   numero_serie     String?       @unique
   date_acquisition DateTime?
   description      String?
-  
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
-
-  // Emprunt (Emprunt longue durée / Assignation)
   id_emprunteur    String?
   emprunteur       Employe?      @relation("Emprunt", fields: [id_emprunteur], references: [id_employe], onDelete: SetNull)
-
-  // Signalements (Pannes)
   signalements     Signalement[]
-
-  // Pour les réservations courtes durées (calendrier)
   reservations     ReservationSalle[]
-
   @@map("ressources")
 }
 
@@ -154,31 +124,23 @@ model Salle {
   capacite     Int
   equipements  String?
   localisation String?
-  
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  
   reservations ReservationSalle[]
-
   @@map("salles")
 }
 
 model ReservationSalle {
   id_reservation String   @id @default(cuid())
-  
-  // Auteur
   id_employe     String?  
   employe        Employe? @relation(fields: [id_employe], references: [id_employe])
-
-  // Salle (Optionnel)
+  
   id_salle       String?
   salle          Salle?   @relation(fields: [id_salle], references: [id_salle], onDelete: Cascade)
-
-  // Ressource/Matériel (Optionnel)
+  
   id_ressource   String?
   ressource      Ressource? @relation(fields: [id_ressource], references: [id_ressource], onDelete: Cascade)
 
-  // Projet (Optionnel)
   id_projet      String?
   projet         Projet?  @relation(fields: [id_projet], references: [id_projet], onDelete: Cascade)
   
@@ -186,10 +148,8 @@ model ReservationSalle {
   date_fin       DateTime
   objet          String?
   statut         StatutReservation @default(CONFIRMEE)
-  
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-
   @@map("reservation_salles")
 }
 
@@ -198,17 +158,12 @@ model Signalement {
   description    String
   statut         String   @default("EN_ATTENTE")
   createdAt      DateTime @default(now())
-
   id_employe     String
   employe        Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
-
   id_ressource   String
   ressource      Ressource @relation(fields: [id_ressource], references: [id_ressource], onDelete: Cascade)
-
   @@map("signalements")
 }
-
-// --- ENUMS ---
 
 enum Role {
   ADMIN
