@@ -1,30 +1,31 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
+import { createLog } from "@/lib/logger";
 
 export async function POST(req: Request) {
   try {
-    const { email, code, rememberMe } = await req.json(); // 👈 On récupère rememberMe
+    // 👇 On récupère 'rememberMe' ici aussi !
+    const { email, code, rememberMe } = await req.json();
 
-    // 1. Trouver l'utilisateur
     const user = await prisma.employe.findUnique({ where: { email } });
 
-    if (!user) {
-      return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
-    }
+    if (!user) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
 
-    // 2. Vérifier le code et l'expiration
+    // 1. Vérification du Code
     if (user.twoFactorCode !== code || !user.twoFactorExpires || new Date() > user.twoFactorExpires) {
-      return NextResponse.json({ error: "Code invalide ou expiré" }, { status: 401 });
+      // Log échec
+      await createLog("CONNEXION_ECHEC", `Code 2FA invalide ou expiré pour ${email}`, user.id_employe);
+      return NextResponse.json({ error: "Code invalide ou expiré" }, { status: 400 });
     }
 
-    // 3. NETTOYAGE : On efface le code utilisé
+    // 2. Nettoyage du code en base (pour qu'il ne serve qu'une fois)
     await prisma.employe.update({
       where: { id_employe: user.id_employe },
       data: { twoFactorCode: null, twoFactorExpires: null }
     });
 
-    // 4. CRÉATION DE LA SESSION (C'est ça qui manquait !)
+    // 3. Création de la Session
     const sessionData = {
         id_employe: user.id_employe,
         nom: user.nom,
@@ -33,33 +34,34 @@ export async function POST(req: Request) {
         email: user.email 
     };
 
-    const response = NextResponse.json({ success: true, user: sessionData });
+    const response = NextResponse.json({ success: true, ...sessionData });
+    const cookieStore = await cookies();
 
-    // Durée du cookie : 30 jours (rememberMe) ou 24h
-    const oneDay = 24 * 60 * 60;
-    const thirtyDays = 30 * 24 * 60 * 60;
-    const duration = rememberMe ? thirtyDays : oneDay;
+    // 4. GESTION DU "SE SOUVENIR DE MOI" (TRUST DEVICE)
+    if (rememberMe) {
+        // On crée un cookie spécial "Device de confiance" qui dure 30 jours
+        response.cookies.set(`trusted_device_${user.id_employe}`, process.env.TRUST_DEVICE_SECRET || "SECRET_PAR_DEFAUT", {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            maxAge: 30 * 24 * 60 * 60, // 30 Jours
+            path: "/",
+        });
+        
+        await createLog("CONNEXION_2FA_SUCCESS", "Appareil ajouté aux favoris (30 jours)", user.id_employe);
+    } else {
+        await createLog("CONNEXION_2FA_SUCCESS", "Connexion temporaire", user.id_employe);
+    }
 
-    // A. Cookie de Session (Indispensable pour naviguer)
+    // 5. Cookie de Session Classique
+    const sessionDuration = rememberMe ? 30 * 24 * 60 * 60 : 24 * 60 * 60; // 30 jours ou 24h
     response.cookies.set("session_user", JSON.stringify(sessionData), { 
         httpOnly: true,
         secure: process.env.NODE_ENV === "production", 
         sameSite: "lax",
-        maxAge: duration,
+        maxAge: sessionDuration,
         path: "/",
     });
-
-    // B. Cookie "Appareil de Confiance" (Pour ne plus demander le code la prochaine fois)
-    // On le met toujours à 30 jours car c'est lié à la machine, pas à la session
-    if (process.env.TRUST_DEVICE_SECRET) {
-        response.cookies.set(`trusted_device_${user.id_employe}`, process.env.TRUST_DEVICE_SECRET + user.id_employe, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
-            maxAge: thirtyDays, 
-            path: "/",
-        });
-    }
 
     return response;
 

@@ -3,15 +3,13 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { Resend } from 'resend';
 import { cookies } from "next/headers";
-import { createLog } from "@/lib/logger"; // 👈 Import Logger
+import { createLog } from "@/lib/logger";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    const { email, password, rememberMe } = await req.json();
-
-    console.log(`Tentative connexion pour: ${email}`);
+    const { email, password, rememberMe } = await req.json(); // rememberMe est reçu ici
 
     // 1. Récupération User
     const user = await prisma.employe.findUnique({ where: { email } });
@@ -21,19 +19,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Identifiants incorrects" }, { status: 401 });
     }
 
-    // 3. VÉRIFICATION CHANGEMENT OBLIGATOIRE
     if (user.doit_changer_mdp) {
-        return NextResponse.json({ 
-            requirePasswordChange: true, 
-            email: user.email 
-        });
+        return NextResponse.json({ requirePasswordChange: true, email: user.email });
     }
     
-    // 4. COOKIE DE CONFIANCE (Connexion directe)
+    // 3. VÉRIFICATION DU COOKIE DE CONFIANCE (La magie opère ici)
     const cookieStore = await cookies();
     const trustCookie = cookieStore.get(`trusted_device_${user.id_employe}`);
 
-    if (trustCookie && trustCookie.value === process.env.TRUST_DEVICE_SECRET + user.id_employe) {
+    // Si le cookie existe ET qu'il est valide
+    if (trustCookie && trustCookie.value === process.env.TRUST_DEVICE_SECRET) {
         
         const sessionData = {
             id_employe: user.id_employe,
@@ -43,14 +38,12 @@ export async function POST(req: Request) {
             email: user.email 
         };
 
-        // ✅ LOG CONNEXION RÉUSSIE
-        await createLog("CONNEXION", "Connexion via mot de passe (Device reconnu)", user.id_employe);
+        await createLog("CONNEXION", "Connexion automatique (Appareil de confiance)", user.id_employe);
 
         const response = NextResponse.json({ success: true, ...sessionData });
 
-        const oneDay = 24 * 60 * 60;
-        const thirtyDays = 30 * 24 * 60 * 60;
-        const duration = rememberMe ? thirtyDays : oneDay;
+        // Durée de la session (30 jours si coché, sinon 24h)
+        const duration = rememberMe ? 30 * 24 * 60 * 60 : 24 * 60 * 60;
 
         response.cookies.set("session_user", JSON.stringify(sessionData), { 
             httpOnly: true,
@@ -63,7 +56,7 @@ export async function POST(req: Request) {
         return response;
     }
 
-    // 5. SINON : ENVOI CODE 2FA
+    // 4. SINON : ON DÉCLENCHE LE 2FA
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -79,9 +72,7 @@ export async function POST(req: Request) {
       html: `<p>Votre code de connexion : <strong>${code}</strong></p>`
     });
 
-    // On loggue l'envoi du code (Optionnel)
-    await createLog("CONNEXION_2FA_SENT", "Code envoyé par email", user.id_employe);
-
+    // IMPORTANT : On renvoie l'info au front pour qu'il sache qu'il faudra traiter le rememberMe après
     return NextResponse.json({ require2fa: true, email: user.email });
 
   } catch (error) {

@@ -58,7 +58,7 @@ export default function LoginPage() {
         body: JSON.stringify({ 
             email, 
             password,
-            rememberMe // 👈 On envoie l'info au backend
+            rememberMe // 👈 On envoie l'info au backend pour qu'il sache
         }),
       });
       const data = await res.json();
@@ -71,9 +71,13 @@ export default function LoginPage() {
             setStep(2);
             toast.success("Code envoyé par email !");
         } else if (data.success) {
+            // Connexion directe (Cookie Trust détecté)
             localStorage.setItem("user_info", JSON.stringify(data));
             toast.success(`Bon retour, ${data.prenom} !`);
-            router.push("/employe/dashboard");
+            
+            // Redirection selon le rôle
+            if (data.role === "ADMIN") router.push("/admin/dashboard");
+            else router.push("/employe/dashboard");
         }
       } else {
         toast.error(data.error || "Erreur connexion");
@@ -82,7 +86,6 @@ export default function LoginPage() {
     finally { setLoading(false); }
   };
 
-  // --- ÉTAPE 2 : 2FA ---
   // --- ÉTAPE 2 : VÉRIFICATION CODE 2FA ---
   const handleVerify2FA = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,22 +97,21 @@ export default function LoginPage() {
         body: JSON.stringify({ 
             email, 
             code: twoFactorCode,
-            rememberMe // 👈 IMPORTANT : On transmet le choix de l'utilisateur
+            rememberMe // 👈 C'EST ICI LA CLÉ : On transmet le choix lors de la validation finale
         }),
       });
       const data = await res.json();
 
       if (res.ok) {
-        // On stocke aussi dans le localStorage pour l'affichage facile côté client
-        localStorage.setItem("user_info", JSON.stringify(data.user));
+        localStorage.setItem("user_info", JSON.stringify(data));
         toast.success("Connexion réussie !");
         
-        // Petit délai pour laisser le temps au cookie de s'écrire
-        setTimeout(() => {
-            router.push("/employe/dashboard");
-            router.refresh(); // Force le rafraîchissement pour que le Middleware voie le cookie
-        }, 500);
+        // Redirection selon le rôle
+        if (data.role === "ADMIN") router.push("/admin/dashboard");
+        else router.push("/employe/dashboard");
         
+        // Petit hack pour forcer le rafraîchissement des cookies côté client
+        router.refresh(); 
       } else {
         toast.error(data.error || "Code invalide");
       }
@@ -184,7 +186,6 @@ export default function LoginPage() {
                     <div className="relative">
                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
                         
-                        {/* 👇 INPUT AVEC BOUTON OEIL */}
                         <input 
                             type={showLoginPassword ? "text" : "password"} 
                             required 
@@ -202,7 +203,7 @@ export default function LoginPage() {
                     </div>
                 </div>
 
-                {/* 👇 CHECKBOX + LIEN OUBLIÉ */}
+                {/* CHECKBOX + LIEN OUBLIÉ */}
                 <div className="flex justify-between items-center text-sm">
                     <label className="flex items-center gap-2 cursor-pointer group">
                         <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${rememberMe ? "bg-blue-600 border-blue-600" : "border-gray-600 bg-transparent"}`}>
