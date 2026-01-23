@@ -1,46 +1,45 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { createLog } from "@/lib/logger"; 
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { email, oldPassword, newPassword } = body;
+    const { email, oldPassword, newPassword } = await req.json();
 
-    console.log("Tentative update MDP pour :", email); // 👇 Log serveur pour débugger
-
-    if (!email || !oldPassword || !newPassword) {
-        return NextResponse.json({ error: "Données manquantes" }, { status: 400 });
-    }
-
+    // 1. Trouver l'utilisateur
     const user = await prisma.employe.findUnique({ where: { email } });
-    
-    if (!user) {
-        return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
+    if (!user) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
+
+    // 2. Vérifier l'ANCIEN mot de passe (le temporaire ou l'ancien)
+    const isMatch = await bcrypt.compare(oldPassword, user.mot_de_passe);
+    if (!isMatch) {
+      return NextResponse.json({ error: "Le mot de passe actuel/temporaire est incorrect." }, { status: 400 });
     }
 
-    // 1. Vérifier l'ancien mot de passe
-    const isValid = await bcrypt.compare(oldPassword, user.mot_de_passe);
-    if (!isValid) {
-        console.log("Ancien mot de passe incorrect");
-        return NextResponse.json({ error: "L'ancien mot de passe est incorrect" }, { status: 401 }); // 401 Unauthorized mais avec message
-    }
+    // 3. Hasher le NOUVEAU mot de passe
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // 2. Mettre à jour
-    const newHash = await bcrypt.hash(newPassword, 10);
-    
+    // 4. MISE À JOUR CRITIQUE ⚡️
+    // On change le mot de passe ET on désactive l'obligation de changement
     await prisma.employe.update({
-        where: { id_employe: user.id_employe },
-        data: {
-            mot_de_passe: newHash,
-            doit_changer_mdp: false
-        }
+      where: { id_employe: user.id_employe },
+      data: { 
+        mot_de_passe: hashedPassword,
+        doit_changer_mdp: false, // 👈 C'est ICI que ça se joue !
+        twoFactorCode: null      // On nettoie les codes 2FA par sécurité
+      }
     });
 
-    return NextResponse.json({ success: true });
+    // 5. Log de sécurité
+    if (createLog) {
+        await createLog("SÉCURITÉ", user.id_employe, "Mot de passe changé (Procédure obligatoire)");
+    }
+
+    return NextResponse.json({ success: true, message: "Mot de passe mis à jour avec succès." });
 
   } catch (error) {
-    console.error("Erreur API Update:", error);
+    console.error(error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
 }

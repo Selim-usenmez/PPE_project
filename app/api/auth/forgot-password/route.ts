@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Resend } from 'resend';
-import crypto from 'crypto';
+import bcrypt from "bcryptjs";
+import { createLog } from "@/lib/logger";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -9,53 +10,52 @@ export async function POST(req: Request) {
   try {
     const { email } = await req.json();
 
-    // ... (Tes vérifications user, user.email, etc. restent pareilles) ...
-    // Je remets juste la partie importante ci-dessous :
-
     const user = await prisma.employe.findUnique({ where: { email } });
-    if (!user) return NextResponse.json({ error: "Aucun compte associé." }, { status: 404 });
+    if (!user) {
+        // On répond OK même si l'user n'existe pas pour éviter le "user enumeration" (sécurité)
+        return NextResponse.json({ message: "Si cet email existe, un mot de passe temporaire a été envoyé." });
+    }
 
-    // 1. Génération du Token
-    const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 3600000); // +1h
+    // 1. Générer un mot de passe temporaire (8 caractères alphanumériques)
+    const tempPassword = Math.random().toString(36).slice(-8) + Math.floor(Math.random() * 100);
+    
+    // 2. Hacher ce mot de passe
+    const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
-    // 2. Sauvegarde en BDD (IMPORTANT : On utilise create ou update)
-    // On nettoie d'abord les vieilles demandes s'il y en a
-    await prisma.demandeMdp.deleteMany({ where: { id_employe: user.id_employe } });
-
-    await prisma.demandeMdp.create({
+    // 3. Mettre à jour l'utilisateur
+    // On change son mot de passe et on active l'obligation de le changer
+    await prisma.employe.update({
+      where: { id_employe: user.id_employe },
       data: {
-        id_employe: user.id_employe,
-        token: token,
-        expiresAt: expiresAt,
-        statut: "EN_ATTENTE"
+        mot_de_passe: hashedPassword,
+        doit_changer_mdp: true, // 👈 C'est ça qui déclenchera l'étape 3 du Login
+        twoFactorCode: null // On nettoie les anciens codes
       }
     });
 
-    // 3. CRÉATION DU LIEN (C'est ici que ça bloquait probablement)
-    // 👇 Vérifie bien que tu as "?token=" à la fin
-    const resetLink = `http://localhost:3000/reset-password?token=${token}`;
-
-    console.log("Lien généré :", resetLink); // Ajoute ça pour voir le lien dans ton terminal !
-
-    // 4. Envoi de l'email
+    // 4. Envoyer l'email
     await resend.emails.send({
-      from: 'securite@likeus.dev', 
-      to: email, 
-      subject: 'Réinitialisez votre mot de passe',
+      from: 'securite@likeus.dev',
+      to: email,
+      subject: 'Réinitialisation de mot de passe',
       html: `
-        <h1>Mot de passe oublié</h1>
-        <p>Cliquez sur le bouton ci-dessous :</p>
-        <a href="${resetLink}" style="padding: 10px 20px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 5px;">
-           Réinitialiser mon mot de passe
-        </a>
-        <p style="font-size:12px; margin-top:20px;">Ou copiez ce lien : ${resetLink}</p>
+        <div style="font-family: sans-serif; padding: 20px;">
+          <h2>Réinitialisation demandée</h2>
+          <p>Voici votre mot de passe temporaire :</p>
+          <p style="font-size: 24px; font-weight: bold; background: #f3f4f6; padding: 10px; display: inline-block; border-radius: 8px;">
+            ${tempPassword}
+          </p>
+          <p>Connectez-vous avec ce mot de passe. Il vous sera demandé de le modifier immédiatement.</p>
+        </div>
       `
     });
 
-    return NextResponse.json({ message: "Email envoyé" });
+    // 5. Log
+    if (createLog) await createLog("SÉCURITÉ", user.id_employe, "Mot de passe temporaire généré");
 
-  } catch (error: any) {
+    return NextResponse.json({ message: "Mot de passe envoyé !" });
+
+  } catch (error) {
     console.error(error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
