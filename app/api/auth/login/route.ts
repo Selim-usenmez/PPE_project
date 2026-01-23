@@ -8,36 +8,32 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    const { email, password } = await req.json();
+    // 👇 On récupère 'rememberMe'
+    const { email, password, rememberMe } = await req.json();
 
-    console.log(`Tentative connexion pour: ${email}`); // Log pour débug
+    console.log(`Tentative connexion pour: ${email}`);
 
     // 1. Récupération User
     const user = await prisma.employe.findUnique({ where: { email } });
     
     // 2. Vérification Mot de passe
     if (!user || !(await bcrypt.compare(password, user.mot_de_passe))) {
-      console.log("❌ Échec : Mot de passe incorrect ou user inconnu");
       return NextResponse.json({ error: "Identifiants incorrects" }, { status: 401 });
     }
 
-    // 🔴 3. VÉRIFICATION CHANGEMENT OBLIGATOIRE (Le point critique)
+    // 3. VÉRIFICATION CHANGEMENT OBLIGATOIRE
     if (user.doit_changer_mdp) {
-        console.log("⚠️ Changement de MDP requis -> Redirection Step 3");
         return NextResponse.json({ 
             requirePasswordChange: true, 
             email: user.email 
         });
     }
-
-    // (Vérifications dates validité ici si nécessaire...)
     
-    // 4. COOKIE DE CONFIANCE (Connexion directe sans code)
+    // 4. COOKIE DE CONFIANCE (Connexion directe)
     const cookieStore = await cookies();
     const trustCookie = cookieStore.get(`trusted_device_${user.id_employe}`);
 
     if (trustCookie && trustCookie.value === process.env.TRUST_DEVICE_SECRET + user.id_employe) {
-        console.log("✅ Device de confiance reconnu -> Connexion directe");
         
         const sessionData = {
             id_employe: user.id_employe,
@@ -49,11 +45,16 @@ export async function POST(req: Request) {
 
         const response = NextResponse.json({ success: true, ...sessionData });
 
+        // 👇 LOGIQUE 30 JOURS OU 24 HEURES
+        const oneDay = 24 * 60 * 60;
+        const thirtyDays = 30 * 24 * 60 * 60;
+        const duration = rememberMe ? thirtyDays : oneDay;
+
         response.cookies.set("session_user", JSON.stringify(sessionData), { 
             httpOnly: true,
             secure: process.env.NODE_ENV === "production", 
             sameSite: "lax",
-            maxAge: 60 * 60 * 24, // 24h
+            maxAge: duration, // 👈 Durée dynamique
             path: "/",
         });
 
@@ -61,9 +62,8 @@ export async function POST(req: Request) {
     }
 
     // 5. SINON : ENVOI CODE 2FA
-    console.log("🔒 Envoi Code 2FA requis");
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
 
     await prisma.employe.update({
       where: { id_employe: user.id_employe },
