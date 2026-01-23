@@ -61,7 +61,7 @@ export async function GET() {
       };
     });
 
-    // 5. Fusionner et Trier par date décroissante (Le plus récent en haut)
+    // 5. Fusionner et Trier par date décroissante (Le plus récent en haut)..
     const globalHistory = [...formattedActions, ...formattedAi, ...formattedResa]
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 50); // On garde les 50 derniers événements globaux
