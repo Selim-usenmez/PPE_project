@@ -16,6 +16,7 @@ export default function LoginPage() {
   // États de formulaire
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
+  const [rememberMe, setRememberMe] = useState(false); // ✅ État géré ici
   const [code, setCode] = useState("");
   const [newPass, setNewPass] = useState({ old: "", new: "", confirm: "" });
 
@@ -27,17 +28,28 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, rememberMe }),
       });
       const data = await res.json();
 
       if (res.ok) {
         if (data.requirePasswordChange) {
-            toast.info("Première connexion : Vous devez définir votre mot de passe.");
+            toast.info("Changement de mot de passe requis.");
             setStep(3);
-        } else if (data.require2fa) {
-            toast.success("Identifiants valides. Code envoyé ! 📧");
+        } 
+        else if (data.require2fa) {
+            // Cas classique : On demande le code
+            toast.success("Code envoyé ! 📧");
             setStep(2);
+        } 
+        else if (data.success) {
+            // ✅ NOUVEAU CAS : Appareil de confiance détecté !
+            toast.success(`Re-bonjour ${data.prenom} ! (Appareil reconnu)`);
+            
+            // On enregistre les infos et on redirige direct
+            localStorage.setItem("user_info", JSON.stringify(data));
+            if (data.role === "ADMIN") router.push("/admin/dashboard");
+            else router.push("/employe/dashboard");
         }
       } else {
         toast.error(data.error || "Erreur de connexion");
@@ -46,7 +58,7 @@ export default function LoginPage() {
     finally { setLoading(false); }
   };
 
-  // ÉTAPE 2 : Vérification 2FA
+  // ÉTAPE 2 : Vérification 2FA (C'est ici que se joue le cookie final)
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -54,7 +66,8 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/verify-2fa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email, code }),
+        // 👇 CORRECTION ICI : On transmet rememberMe pour que le serveur sache quelle durée mettre
+        body: JSON.stringify({ email: form.email, code, rememberMe }),
       });
       const data = await res.json();
 
@@ -90,7 +103,7 @@ export default function LoginPage() {
         
         if (res.ok) {
             toast.success("Mot de passe mis à jour ! Veuillez vous reconnecter.");
-            setStep(1); // Retour case départ
+            setStep(1); 
             setForm({...form, password: ""});
             setNewPass({old:"", new:"", confirm:""});
         } else {
@@ -140,6 +153,20 @@ export default function LoginPage() {
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition p-1">
                         {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                     </button>
+                </div>
+
+                {/* 👇 BOUTON SE SOUVENIR DE MOI */}
+                <div className="flex items-center gap-2 px-1">
+                    <input 
+                        type="checkbox" 
+                        id="remember" 
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="rounded border-gray-600 bg-gray-700 w-4 h-4 cursor-pointer accent-blue-500" 
+                    />
+                    <label htmlFor="remember" className="text-sm text-gray-400 cursor-pointer select-none">
+                        Se souvenir de moi (30 jours)
+                    </label>
                 </div>
 
                 <button type="submit" disabled={loading} className="w-full btn-neon-blue py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all">

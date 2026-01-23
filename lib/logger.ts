@@ -5,9 +5,27 @@ export async function createLog(action: string, details: string, auteurForce?: s
   try {
     let auteur = "Système / Inconnu";
 
-    // CAS 1 : On force l'auteur (ex: Login échoué, on a juste l'email)
+    // CAS 1 : On force l'auteur
     if (auteurForce) {
-        auteur = auteurForce;
+        // ✅ Vérifier si c'est un ID (CUID) ou un email
+        if (auteurForce.includes("@")) {
+          // C'est déjà un email
+          auteur = auteurForce;
+        } else {
+          // C'est probablement un ID, aller chercher l'email en base
+          try {
+            const employe = await prisma.employe.findUnique({
+              where: { id_employe: auteurForce }
+            });
+            if (employe) {
+              auteur = employe.email;
+            } else {
+              auteur = auteurForce; // Fallback à l'ID si pas trouvé
+            }
+          } catch (e) {
+            auteur = auteurForce;
+          }
+        }
     } 
     // CAS 2 : On essaie de deviner via le cookie (Utilisateur connecté)
     else {
@@ -17,8 +35,19 @@ export async function createLog(action: string, details: string, auteurForce?: s
         if (sessionCookie) {
           try {
             const user = JSON.parse(sessionCookie.value);
-            auteur = `${user.prenom || ''} ${user.nom || ''}`.trim();
-            if (user.role) auteur += ` (${user.role})`;
+            
+            if (user.id_employe) {
+              const employe = await prisma.employe.findUnique({
+                where: { id_employe: user.id_employe }
+              });
+              
+              if (employe) {
+                auteur = employe.email;
+              }
+            } 
+            else if (user.email) {
+              auteur = user.email;
+            }
           } catch (e) {
             auteur = "Utilisateur (Erreur lecture cookie)";
           }

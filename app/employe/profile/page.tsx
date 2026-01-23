@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner"; 
 import Link from "next/link";
-// 👇 IMPORTS LUCIDE
 import { 
   User, Mail, Lock, ShieldCheck, Calendar, Save, 
   Loader2, ArrowLeft, KeyRound, CheckCircle2 
@@ -20,43 +19,70 @@ export default function UserProfile() {
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
 
   useEffect(() => {
+    // 1. On regarde ce qu'il y a dans le navigateur (LocalStorage)
     const stored = localStorage.getItem("user_info");
+    
     if (!stored) {
         router.push("/login");
-    } else {
-        const u = JSON.parse(stored);
-        setUser(u);
-        setInfoForm({ nom: u.nom, prenom: u.prenom, email: u.email });
+        return;
+    }
+
+    const localUser = JSON.parse(stored);
+    
+    // 2. On affiche immédiatement les infos de base (Nom, Email...) pour pas que ça clignote
+    setUser(localUser);
+    setInfoForm({ nom: localUser.nom, prenom: localUser.prenom, email: localUser.email });
+
+    // 3. ⚡️ IMPORTANT : On demande à l'API les infos COMPLÈTES (dont les dates !)
+    if (localUser.id_employe) {
+        fetch(`/api/employes/${localUser.id_employe}`)
+            .then(res => res.json())
+            .then(fullData => {
+                if (!fullData.error) {
+                    // ✅ On met à jour l'utilisateur avec les données fraîches de la BDD
+                    setUser(fullData);
+                    setInfoForm({ 
+                        nom: fullData.nom, 
+                        prenom: fullData.prenom, 
+                        email: fullData.email 
+                    });
+                }
+            })
+            .catch(err => console.error("Erreur chargement profil complet", err));
     }
   }, [router]);
 
-  // MISE À JOUR INFOS
+  // --- MISE À JOUR INFOS (Nom / Prénom) ---
   const handleUpdateInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-        const res = await fetch("/api/employes/profile", {
+        // On utilise l'ID de l'employé dans l'URL
+        const res = await fetch(`/api/employes/${user.id_employe}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
-                type: "info", 
-                id: user.id || user.id_employe, 
-                ...infoForm 
+                nom: infoForm.nom,
+                prenom: infoForm.prenom,
+                // On n'envoie pas l'email pour éviter les conflits d'unicité s'il ne change pas
             }),
         });
+        
         const data = await res.json();
+        
         if (res.ok) {
             toast.success("Informations mises à jour !");
-            setUser(data.user);
-            localStorage.setItem("user_info", JSON.stringify(data.user));
+            setUser(data); // On met à jour l'affichage
+            // On met à jour le cache local pour la prochaine fois
+            localStorage.setItem("user_info", JSON.stringify(data));
         } else {
-            toast.error(data.error);
+            toast.error(data.error || "Erreur lors de la mise à jour");
         }
     } catch (err) { toast.error("Erreur serveur"); } 
     finally { setLoading(false); }
   };
 
-  // CHANGEMENT MOT DE PASSE
+  // --- CHANGEMENT MOT DE PASSE ---
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (passwords.new !== passwords.confirm) {
@@ -65,22 +91,21 @@ export default function UserProfile() {
     }
     setLoading(true);
     try {
-        const res = await fetch("/api/employes/profile", {
+        const res = await fetch(`/api/employes/${user.id_employe}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
-                type: "password", 
-                id: user.id || user.id_employe, 
-                currentPassword: passwords.current, 
-                newPassword: passwords.new 
+                mot_de_passe: passwords.new 
             }),
         });
+        
         const data = await res.json();
+        
         if (res.ok) {
             toast.success("Mot de passe modifié avec succès ! 🔒");
             setPasswords({ current: "", new: "", confirm: "" });
         } else {
-            toast.error(data.error);
+            toast.error(data.error || "Erreur changement mot de passe");
         }
     } catch (err) { toast.error("Erreur serveur"); } 
     finally { setLoading(false); }
@@ -111,7 +136,7 @@ export default function UserProfile() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 
-                {/* --- COLONNE GAUCHE : CARTE IDENTITÉ --- */}
+                {/* --- COLONNE GAUCHE : CARTE IDENTITÉ & DATES --- */}
                 <div className="lg:col-span-1 space-y-6">
                     <div className="glass-panel p-8 rounded-2xl text-center border border-white/10 shadow-2xl relative overflow-hidden">
                         
@@ -131,25 +156,37 @@ export default function UserProfile() {
                         
                         <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20">
                             <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
-                            <span className="text-xs font-bold text-blue-300 uppercase tracking-wide">{user.role.replace("_", " ")}</span>
+                            <span className="text-xs font-bold text-blue-300 uppercase tracking-wide">{user.role?.replace("_", " ")}</span>
                         </div>
                         
+                        {/* 👇 SECTION DATES DE VALIDITÉ (CORRIGÉE) 👇 */}
                         <div className="mt-8 border-t border-white/10 pt-6 text-left space-y-4">
                             <p className="text-xs text-gray-500 uppercase font-bold flex items-center gap-2">
                                 <Calendar className="w-3 h-3" /> Validité du compte
                             </p>
-                            <div className="bg-black/30 p-4 rounded-xl space-y-3 border border-white/5">
+                            <div className="bg-white/5 p-4 rounded-xl space-y-3 border border-white/5">
                                 <div className="flex justify-between text-sm items-center">
                                     <span className="text-gray-400">Début contrat</span>
-                                    <span className="text-white font-mono">{user.date_debut_validite ? new Date(user.date_debut_validite).toLocaleDateString() : "N/A"}</span>
+                                    <span className="text-white font-mono">
+                                        {/* Vérification que la date existe avant de l'afficher */}
+                                        {user.date_debut_validite 
+                                            ? new Date(user.date_debut_validite).toLocaleDateString('fr-FR') 
+                                            : "Non défini"}
+                                    </span>
                                 </div>
-                                <div className="w-full h-px bg-white/5"></div>
+                                <div className="w-full h-px bg-white/10"></div>
                                 <div className="flex justify-between text-sm items-center">
                                     <span className="text-gray-400">Fin contrat</span>
-                                    <span className="text-blue-300 font-bold font-mono">{user.date_fin_validite ? new Date(user.date_fin_validite).toLocaleDateString() : "Indéterminé"}</span>
+                                    <span className={`font-bold font-mono ${user.date_fin_validite ? 'text-blue-300' : 'text-green-400'}`}>
+                                        {user.date_fin_validite 
+                                            ? new Date(user.date_fin_validite).toLocaleDateString('fr-FR') 
+                                            : "Illimitée"}
+                                    </span>
                                 </div>
                             </div>
                         </div>
+                        {/* 👆 FIN SECTION DATES 👆 */}
+
                     </div>
                 </div>
 
@@ -207,25 +244,14 @@ export default function UserProfile() {
                         
                         <form onSubmit={handleChangePassword} className="space-y-5">
                             <div>
-                                <label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block ml-1">Mot de passe actuel</label>
-                                <div className="relative">
-                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                                    <input type="password" placeholder="••••••••" className="glass-input w-full pl-10 focus:border-red-500" required
-                                        value={passwords.current} onChange={e => setPasswords({...passwords, current: e.target.value})} />
-                                </div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block ml-1">Nouveau mot de passe</label>
+                                <input type="password" placeholder="Minimum 6 caractères" className="glass-input w-full focus:border-red-500" required minLength={6}
+                                    value={passwords.new} onChange={e => setPasswords({...passwords, new: e.target.value})} />
                             </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block ml-1">Nouveau mot de passe</label>
-                                    <input type="password" placeholder="Minimum 6 caractères" className="glass-input w-full focus:border-red-500" required minLength={6}
-                                        value={passwords.new} onChange={e => setPasswords({...passwords, new: e.target.value})} />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block ml-1">Confirmer</label>
-                                    <input type="password" placeholder="Répétez le mot de passe" className="glass-input w-full focus:border-red-500" required minLength={6}
-                                        value={passwords.confirm} onChange={e => setPasswords({...passwords, confirm: e.target.value})} />
-                                </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block ml-1">Confirmer le mot de passe</label>
+                                <input type="password" placeholder="Répétez le mot de passe" className="glass-input w-full focus:border-red-500" required minLength={6}
+                                    value={passwords.confirm} onChange={e => setPasswords({...passwords, confirm: e.target.value})} />
                             </div>
 
                             <div className="flex justify-end pt-4">

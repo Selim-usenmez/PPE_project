@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import AdminSidebar from "../../components/AdminSidebar";
-// 👇 Imports complets pour couvrir tous les cas de figure
 import { 
   Search, Clock, LogIn, Trash2, PlusCircle, Edit3, 
   AlertTriangle, CheckCircle, FileText, ScrollText, 
-  Loader2, ShieldAlert, Ban, RefreshCcw, User 
+  Loader2, Ban, RefreshCcw, User, X, ExternalLink,
+  Calendar, User2
 } from "lucide-react";
 
 export default function AdminHistorique() {
@@ -14,6 +14,7 @@ export default function AdminHistorique() {
   const [filteredLogs, setFilteredLogs] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [selectedLog, setSelectedLog] = useState<any>(null);
 
   // Chargement des données
   useEffect(() => {
@@ -38,39 +39,33 @@ export default function AdminHistorique() {
     ));
   }, [search, logs]);
 
-  // Fonction pour styliser chaque ligne selon l'action
   const getActionStyle = (action: string) => {
     const act = action.toUpperCase();
 
-    // 🔴 DANGER / SUPPRESSION / ECHEC CRITIQUE
     if (act.includes("SUPPRESSION") || act.includes("ECHEC") || act.includes("BAN")) {
         return { 
             bg: "bg-red-500/10", border: "border-red-500/20", text: "text-red-400", 
             icon: act.includes("ECHEC") ? <Ban size={14} /> : <Trash2 size={14} /> 
         };
     }
-    // 🟠 ATTENTION / INCIDENT / MODIF MDP
     if (act.includes("INCIDENT") || act.includes("MDP") || act.includes("RESET")) {
         return { 
             bg: "bg-orange-500/10", border: "border-orange-500/20", text: "text-orange-400", 
             icon: act.includes("MDP") ? <RefreshCcw size={14} /> : <AlertTriangle size={14} /> 
         };
     }
-    // 🟢 CREATION / AJOUT / SUCCES
     if (act.includes("CRÉATION") || act.includes("AJOUT") || act.includes("SUCCES")) {
         return { 
             bg: "bg-green-500/10", border: "border-green-500/20", text: "text-green-400", 
             icon: <PlusCircle size={14} /> 
         };
     }
-    // 🟣 CONNEXION / LOGIN
     if (act.includes("CONNEXION") || act.includes("LOGIN")) {
         return { 
             bg: "bg-purple-500/10", border: "border-purple-500/20", text: "text-purple-400", 
             icon: <LogIn size={14} /> 
         };
     }
-    // 🔵 PAR DEFAUT / MODIF / INFO
     return { 
         bg: "bg-blue-500/10", border: "border-blue-500/20", text: "text-blue-400", 
         icon: <FileText size={14} /> 
@@ -108,7 +103,7 @@ export default function AdminHistorique() {
         </div>
 
         {/* TABLEAU */}
-        <div className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl min-h-[500px]">
+        <div className="rounded-2xl overflow-hidden border border-white/10 shadow-2xl min-h-[500px] bg-white/5 backdrop-blur">
             {loading ? (
                 <div className="flex flex-col items-center justify-center h-full py-20">
                     <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
@@ -133,8 +128,11 @@ export default function AdminHistorique() {
                         {filteredLogs.map((log) => {
                             const style = getActionStyle(log.action);
                             return (
-                                <tr key={log.id_action} className="hover:bg-white/5 transition group">
-                                    {/* DATE */}
+                                <tr 
+                                  key={log.id_action} 
+                                  className="hover:bg-white/5 transition group cursor-pointer"
+                                  onClick={() => setSelectedLog(log)}
+                                >
                                     <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 font-mono">
                                         <div className="flex items-center gap-2">
                                             <Clock size={14} className="text-gray-600" /> 
@@ -142,7 +140,6 @@ export default function AdminHistorique() {
                                         </div>
                                     </td>
 
-                                    {/* AUTEUR */}
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="flex items-center gap-2">
                                             <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center border border-white/10">
@@ -152,7 +149,6 @@ export default function AdminHistorique() {
                                         </div>
                                     </td>
 
-                                    {/* ACTION (BADGE) */}
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <span className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-md text-[10px] font-bold border uppercase tracking-wider ${style.bg} ${style.border} ${style.text}`}>
                                             {style.icon} 
@@ -160,7 +156,6 @@ export default function AdminHistorique() {
                                         </span>
                                     </td>
 
-                                    {/* DÉTAILS */}
                                     <td className="px-6 py-4 text-sm text-gray-400 truncate max-w-md group-hover:text-gray-200 transition-colors">
                                         {log.details}
                                     </td>
@@ -172,6 +167,114 @@ export default function AdminHistorique() {
             )}
         </div>
       </main>
+
+      {/* MODAL DÉTAIL */}
+      {selectedLog && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f172a] border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            
+            {/* EN-TÊTE MODAL */}
+            <div className="flex items-start justify-between p-6 border-b border-white/10 sticky top-0 bg-[#0f172a]">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${getActionStyle(selectedLog.action).bg}`}>
+                  {getActionStyle(selectedLog.action).icon}
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">
+                    {selectedLog.action.replace(/_/g, " ")}
+                  </h2>
+                  <p className="text-gray-400 text-sm">Détails de l'événement</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedLog(null)}
+                className="text-gray-400 hover:text-white transition"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* CONTENU MODAL */}
+            <div className="p-6 space-y-6">
+              
+              {/* DATE ET HEURE */}
+              <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                <div className="flex items-center gap-2 text-gray-400 mb-2">
+                  <Calendar size={16} />
+                  <span className="text-xs uppercase font-semibold">Date et heure</span>
+                </div>
+                <p className="text-white font-mono text-sm">
+                  {new Date(selectedLog.createdAt).toLocaleString('fr-FR', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  })}
+                </p>
+              </div>
+
+              {/* AUTEUR */}
+              <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                <div className="flex items-center gap-2 text-gray-400 mb-2">
+                  <User2 size={16} />
+                  <span className="text-xs uppercase font-semibold">Auteur</span>
+                </div>
+                <p className="text-white font-semibold">{selectedLog.auteur}</p>
+              </div>
+
+              {/* ACTION */}
+              <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                <div className="flex items-center gap-2 text-gray-400 mb-2">
+                  <FileText size={16} />
+                  <span className="text-xs uppercase font-semibold">Action effectuée</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-md text-xs font-bold border uppercase tracking-wider ${getActionStyle(selectedLog.action).bg} ${getActionStyle(selectedLog.action).border} ${getActionStyle(selectedLog.action).text}`}>
+                    {getActionStyle(selectedLog.action).icon}
+                    {selectedLog.action.replace(/_/g, " ")}
+                  </span>
+                </div>
+              </div>
+
+              {/* DÉTAILS COMPLETS */}
+              <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                <div className="flex items-center gap-2 text-gray-400 mb-2">
+                  <ExternalLink size={16} />
+                  <span className="text-xs uppercase font-semibold">Détails complets</span>
+                </div>
+                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                  {selectedLog.details || "Aucun détail disponible"}
+                </p>
+              </div>
+
+              {/* ID ACTION (POUR DEBUG) */}
+              <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                <div className="flex items-center gap-2 text-gray-400 mb-2">
+                  <FileText size={16} />
+                  <span className="text-xs uppercase font-semibold">ID de l'action</span>
+                </div>
+                <p className="text-gray-400 font-mono text-xs break-all">
+                  {selectedLog.id_action}
+                </p>
+              </div>
+
+            </div>
+
+            {/* BOUTON FERMER */}
+            <div className="p-6 border-t border-white/10 flex justify-end">
+              <button
+                onClick={() => setSelectedLog(null)}
+                className="px-4 py-2 bg-blue-500/20 border border-blue-500/30 rounded-lg text-blue-400 hover:bg-blue-500/30 transition font-semibold text-sm"
+              >
+                Fermer
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }

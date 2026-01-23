@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createLog } from "@/lib/logger";
 
 export async function POST() {
-  const response = NextResponse.json({ message: "Déconnecté" });
+  const cookieStore = await cookies();
+  const session = cookieStore.get("session_user");
 
-  // On écrase le cookie avec une expiration immédiate
-  response.cookies.set("session_user", "", {
-    httpOnly: true,
-    expires: new Date(0), // Date dans le passé = suppression immédiate
-    path: "/",
-  });
+  if (session) {
+      try {
+          const user = JSON.parse(session.value);
+          // ✅ AJOUT DU LOG
+          await createLog("DÉCONNEXION", user.id_employe, "Déconnexion manuelle");
+      } catch(e) {}
+  }
 
-  return response;
+  cookieStore.delete("session_user");
+  return NextResponse.json({ success: true });
 }
