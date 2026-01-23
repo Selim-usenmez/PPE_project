@@ -23,6 +23,20 @@ model HistoriqueAction {
   @@map("historique_actions")
 }
 
+// 👇 NOUVEAU MODÈLE POUR L'IA
+model AiLog {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  
+  id_employe String
+  employe    Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
+  
+  prompt     String?  // On sauvegarde ce que l'utilisateur a demandé
+
+  @@index([id_employe])
+  @@map("ai_logs")
+}
+
 model Employe {
   id_employe          String    @id @default(cuid())
   nom                 String
@@ -52,6 +66,9 @@ model Employe {
   signalements        Signalement[]
   historique_actions  HistoriqueAction[]
   reservations        ReservationSalle[]
+  
+  // 👇 NOUVELLE RELATION POUR L'IA
+  historique_ia       AiLog[]
 
   @@map("employes")
 }
@@ -125,7 +142,7 @@ model Ressource {
   // Signalements (Pannes)
   signalements     Signalement[]
 
-  // 👇 AJOUTÉ : Pour les réservations courtes durées (calendrier)
+  // Pour les réservations courtes durées (calendrier)
   reservations     ReservationSalle[]
 
   @@map("ressources")
@@ -157,7 +174,7 @@ model ReservationSalle {
   id_salle       String?
   salle          Salle?   @relation(fields: [id_salle], references: [id_salle], onDelete: Cascade)
 
-  // 👇 AJOUTÉ : Ressource/Matériel (Optionnel)
+  // Ressource/Matériel (Optionnel)
   id_ressource   String?
   ressource      Ressource? @relation(fields: [id_ressource], references: [id_ressource], onDelete: Cascade)
 

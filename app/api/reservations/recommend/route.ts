@@ -10,49 +10,57 @@ const anthropic = new Anthropic({
 
 export async function POST(req: Request) {
   try {
-    const { start, end, objet } = await req.json();
+    // 👇 ON RÉCUPÈRE L'ID EMPLOYE MAINTENANT
+    const { start, end, objet, userId } = await req.json();
 
-    if (!objet) return NextResponse.json(null);
+    if (!objet || !userId) return NextResponse.json({ error: "Données manquantes" }, { status: 400 });
 
-    // 1. DATA CONTEXT
-    const salles = await prisma.salle.findMany();
-    // On récupère SEULEMENT le matériel libre
-    const ressources = await prisma.ressource.findMany({ where: { etat: "DISPONIBLE" } });
+    // 1. VÉRIFICATION DES QUOTAS (SÉCURITÉ SERVEUR)
+    const user = await prisma.employe.findUnique({ where: { id_employe: userId } });
     
+    if (!user) return NextResponse.json({ error: "Utilisateur inconnu" }, { status: 401 });
+
+    // Si pas Admin, on vérifie la limite
+    if (user.role !== "ADMIN") {
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        
+        const usageCount = await prisma.aiLog.count({
+            where: {
+                id_employe: userId,
+                createdAt: { gte: tenMinutesAgo } // Logs datant de moins de 10min
+            }
+        });
+
+        if (usageCount >= 2) {
+            return NextResponse.json(
+                { error: "Quota dépassé (2 essais / 10min). Attendez un peu." }, 
+                { status: 429 } // Code HTTP "Too Many Requests"
+            );
+        }
+    }
+
+    // 2. RÉCUPÉRATION DATA
+    const salles = await prisma.salle.findMany();
+    const ressources = await prisma.ressource.findMany({ where: { etat: "DISPONIBLE" } });
     const now = new Date();
-    const contextDate = now.toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const contextDate = now.toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 
     if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json(null);
 
-    // 2. PROMPT EXPERT (Focus Matériel)
+    // 3. APPEL CLAUDE
     const systemPrompt = `
-        Tu es un assistant de planification intelligent.
-        Nous sommes le : ${contextDate}.
+        Tu es un assistant de planification. Date: ${contextDate}.
+        SALLES: ${JSON.stringify(salles.map(s => ({ id: s.id_salle, nom: s.nom_salle, cap: s.capacite, equip: s.equipements })))}
+        MATÉRIEL: ${JSON.stringify(ressources.map(r => ({ id: r.id_ressource, nom: r.nom_ressource })))}
+        DEMANDE: "${objet}"
         
-        SALLES DISPO (JSON): ${JSON.stringify(salles.map(s => ({ id: s.id_salle, nom: s.nom_salle, cap: s.capacite, equip: s.equipements })))}
-        MATÉRIEL DISPO (JSON): ${JSON.stringify(ressources.map(r => ({ id: r.id_ressource, nom: r.nom_ressource, type: r.type })))}
-
-        DEMANDE UTILISATEUR : "${objet}"
-
-        RÈGLES DE DÉCISION :
-        1. DATES : Extrais les dates si mentionnées.
-        2. CAPACITÉ : Déduis le nombre de personnes.
-        3. SALLE : Choisis la salle la plus adaptée.
-        4. MATÉRIEL (PRIORITAIRE) : 
-           - Si l'utilisateur demande EXPLICITEMENT un objet (ex: "besoin d'une voiture", "il me faut un mac", "avec projecteur"), cherche l'ID correspondant dans la liste MATÉRIEL DISPO.
-           - Si l'utilisateur ne demande rien, mais que la salle choisie manque d'équipement vital pour le motif (ex: visio sans écran), propose le matériel adéquat.
-           - Si rien de tout ça, renvoie null.
-
-        RÉPONSE JSON STRICT :
-        {
-            "analysis": "Analyse du besoin (mentionne si matériel détecté)",
-            "detected_pax": "Nombre estimé (entier) ou null",
-            "suggested_start": "ISO_DATE ou null",
-            "suggested_end": "ISO_DATE ou null",
-            "id_salle": "ID ou null",
-            "id_materiel": "ID ou null",
-            "criteria": ["Critère 1", "Critère 2"]
-        }
+        RÈGLES:
+        1. Extrais dates (null si absent).
+        2. Estime nb personnes.
+        3. Choisis salle + matériel.
+        
+        JSON STRICT:
+        {"analysis": "...", "detected_pax": int/null, "suggested_start": "ISO"/null, "suggested_end": "ISO"/null, "id_salle": "ID"/null, "id_materiel": "ID"/null, "criteria": []}
     `;
 
     const msg = await anthropic.messages.create({
@@ -65,6 +73,14 @@ export async function POST(req: Request) {
     const textResponse = msg.content[0].type === 'text' ? msg.content[0].text : "{}";
     const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
     const ai = JSON.parse(jsonMatch ? jsonMatch[0] : "{}");
+
+    // 4. LOGUER L'UTILISATION (C'est ici qu'on sauvegarde)
+    await prisma.aiLog.create({
+        data: {
+            id_employe: userId,
+            prompt: objet // On garde une trace de ce qu'il a demandé
+        }
+    });
 
     const room = salles.find(s => s.id_salle === ai.id_salle);
     const equipment = ressources.find(r => r.id_ressource === ai.id_materiel);
@@ -80,6 +96,6 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error(error);
-    return NextResponse.json(null);
+    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
 }

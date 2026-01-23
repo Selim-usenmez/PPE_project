@@ -131,52 +131,41 @@ export default function EmployeReservationsPage() {
 
   // 3. FONCTION APPEL IA (Manuelle maintenant)
   const handleAnalyzeAI = async () => {
-      if (!form.objet || form.objet.length < 5) return toast.warning("Décrivez d'abord votre besoin.");
+    if (!form.objet || form.objet.length < 5) return toast.warning("Décrivez d'abord votre besoin.");
 
-      // VÉRIFICATION QUOTA (Sauf Admin)
-      const isAdmin = user?.role === "ADMIN";
-      const maxRetries = 2;
-      const cooldownMs = 10 * 60 * 1000; // 10 minutes
-
-      if (!isAdmin && aiUsageCount >= maxRetries) {
-          return toast.error(`Quota atteint. Réessayez dans ${timeLeft}.`);
-      }
-
-      setAnalyzing(true);
-      try {
-          const res = await fetch("/api/reservations/recommend", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ 
-                  start: form.date_debut, 
-                  end: form.date_fin, 
-                  objet: form.objet 
-              })
-          });
-          
-          if (res.ok) {
-              const data = await res.json();
-              setAdvice(data);
-
-              // GESTION COMPTEUR (Sauf Admin)
-              if (!isAdmin) {
-                  const newCount = aiUsageCount + 1;
-                  setAiUsageCount(newCount);
-                  
-                  // Si c'est le premier essai, on lance le timer
-                  if (!quotaResetTime) {
-                      const resetAt = Date.now() + cooldownMs;
-                      setQuotaResetTime(resetAt);
-                      localStorage.setItem(`ai_quota_${user.id_employe}`, JSON.stringify({ count: newCount, resetAt }));
-                  } else {
-                      // On met juste à jour le compteur
-                      localStorage.setItem(`ai_quota_${user.id_employe}`, JSON.stringify({ count: newCount, resetAt: quotaResetTime }));
-                  }
-              }
-          }
-      } catch (e) { toast.error("Erreur assistant IA"); } 
-      finally { setAnalyzing(false); }
-  };
+    // On enlève la logique locale (localStorage) car le serveur gère tout maintenant !
+    // C'est beaucoup plus sûr.
+    
+    setAnalyzing(true);
+    try {
+        const res = await fetch("/api/reservations/recommend", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+                start: form.date_debut, 
+                end: form.date_fin, 
+                objet: form.objet,
+                userId: user.id_employe // 👈 AJOUT CRUCIAL ICI
+            })
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            setAdvice(data);
+            // On peut incrémenter un compteur local juste pour l'affichage visuel si tu veux
+            if (user.role !== "ADMIN") setAiUsageCount(prev => prev + 1);
+        } else {
+            // Si le serveur répond 429 (Trop de requêtes)
+            if (res.status === 429) {
+                const err = await res.json();
+                toast.error("⏳ " + err.error); // Affiche "Quota dépassé..."
+            } else {
+                toast.error("Erreur assistant IA");
+            }
+        }
+    } catch (e) { toast.error("Erreur connexion serveur"); } 
+    finally { setAnalyzing(false); }
+};
 
   const applySuggestion = () => {
       if (!advice) return;
