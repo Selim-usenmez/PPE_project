@@ -17,6 +17,9 @@ model HistoriqueAction {
   auteur    String   // Ex: "Jean Dupont"
   createdAt DateTime @default(now())
 
+  // ✅ Relation pour afficher le nom dans les logs
+  employe   Employe? @relation(fields: [auteur], references: [id_employe])
+
   @@map("historique_actions")
 }
 
@@ -51,12 +54,16 @@ model Employe {
   ressources_empruntees Ressource[] @relation("Emprunt")
   signalements        Signalement[]
 
+  // ✅ Les 2 lignes qui manquaient pour que tout fonctionne :
+  historique_actions  HistoriqueAction[]
+  reservations        ReservationSalle[]
+
   @@map("employes")
 }
 
 model DemandeMdp {
-  id_demande String   @id @default(cuid()) // ✅ Seul ID unique
-  id_employe String   // Clé étrangère simple (pas de @id ici)
+  id_demande String   @id @default(cuid())
+  id_employe String   // Clé étrangère simple
   
   statut     String   @default("EN_ATTENTE")
   createdAt  DateTime @default(now())
@@ -70,15 +77,15 @@ model DemandeMdp {
 }
 
 model Projet {
-  id_projet      String                @id @default(cuid())
+  id_projet      String    @id @default(cuid())
   nom_projet     String
   description    String?
   date_debut     DateTime
   date_fin       DateTime?
-  statut         StatutProjet          @default(EN_COURS)
+  statut         StatutProjet           @default(EN_COURS)
   
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
   
   participations ParticipationProjet[]
   reservations   ReservationSalle[]
@@ -104,7 +111,7 @@ model ParticipationProjet {
 }
 
 model Ressource {
-  id_ressource     String        @id @default(cuid())
+  id_ressource     String    @id @default(cuid())
   nom_ressource    String
   type             TypeRessource
   etat             EtatRessource @default(DISPONIBLE)
@@ -127,14 +134,14 @@ model Ressource {
 }
 
 model Salle {
-  id_salle     String             @id @default(cuid())
-  nom_salle    String             @unique
+  id_salle     String   @id @default(cuid())
+  nom_salle    String   @unique
   capacite     Int
   equipements  String?
   localisation String?
   
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
   
   reservations ReservationSalle[]
 
@@ -142,19 +149,26 @@ model Salle {
 }
 
 model ReservationSalle {
-  id_reservation String            @id @default(cuid())
-  id_salle       String
-  id_projet      String
+  id_reservation String   @id @default(cuid())
+  
+  // Relation avec Employé (Auteur de la résa)
+  id_employe     String?  
+  employe        Employe? @relation(fields: [id_employe], references: [id_employe])
+
+  // Salle et Projet optionnels
+  id_salle       String?
+  id_projet      String?
+  
   date_debut     DateTime
   date_fin       DateTime
   objet          String?
   statut         StatutReservation @default(CONFIRMEE)
   
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   
-  projet         Projet            @relation(fields: [id_projet], references: [id_projet], onDelete: Cascade)
-  salle          Salle             @relation(fields: [id_salle], references: [id_salle], onDelete: Cascade)
+  projet         Projet?  @relation(fields: [id_projet], references: [id_projet], onDelete: Cascade)
+  salle          Salle?   @relation(fields: [id_salle], references: [id_salle], onDelete: Cascade)
 
   @@map("reservation_salles")
 }
@@ -169,7 +183,6 @@ model Signalement {
   employe        Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
 
   id_ressource   String
-  // 👇 AJOUTE "onDelete: Cascade" ICI 👇
   ressource      Ressource @relation(fields: [id_ressource], references: [id_ressource], onDelete: Cascade)
 
   @@map("signalements")
@@ -183,7 +196,7 @@ enum Role {
   RH
   DEVELOPPEUR
   STAGIAIRE
-  EMPLOYE  // 👈 RAJOUTE CETTE LIGNE ICI
+  EMPLOYE
 }
 
 enum StatutProjet {

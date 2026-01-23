@@ -41,7 +41,6 @@ export default function AdminSidebar() {
     { name: "Projets", path: "/admin/projets", icon: Briefcase, access: true },
     { name: "Ressources", path: "/admin/ressources", icon: Box, access: true },
     { name: "Incidents", path: "/admin/incidents", icon: AlertTriangle, access: true },
-    { name: "Demandes MDP", path: "/admin/demandes", icon: KeyRound, access: canManageEmployees(role) },
     { name: "Historique", path: "/admin/historique", icon: ScrollText, access: role === "ADMIN" },
   ];
 
