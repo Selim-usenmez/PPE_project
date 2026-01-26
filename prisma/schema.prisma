@@ -43,6 +43,7 @@ model Employe {
   historique_actions  HistoriqueAction[]
   reservations        ReservationSalle[]
   historique_ia       AiLog[]
+  notesPerso          NotePerso[]
   
   // 👇 NOUVEAU : RELATIONS TÂCHES
   tachesRecues        Tache[] @relation("TacheRecue")
@@ -114,6 +115,17 @@ model Projet {
   taches         Tache[] 
 
   @@map("projets")
+}
+
+model NotePerso {
+  id_note       String   @id @default(cuid())
+  contenu       String
+  createdAt     DateTime @default(now())
+  
+  id_employe    String
+  employe       Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
+
+  @@map("notes_perso")
 }
 
 model ParticipationProjet {

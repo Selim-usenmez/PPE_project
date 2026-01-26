@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { 
   Settings, LogOut, Calendar, AlertTriangle, Briefcase, Clock, MapPin, Loader2, 
   Plus, Trash2, Edit3, X, CalendarRange, FolderOpen, ShieldCheck, User, Box, 
-  CheckCircle2, BellRing 
+  CheckCircle2, BellRing, StickyNote 
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -25,16 +25,33 @@ const formatForInput = (d: any) => {
     } catch (e) { return ""; }
 };
 
+// --- RENDER PERSONNALISÉ DES ÉVÉNEMENTS (Le côté "Sexy") ---
+function renderEventContent(eventInfo: any) {
+    const isMine = eventInfo.event.extendedProps.isMine;
+    return (
+      <div className={`w-full h-full p-1.5 flex flex-col justify-start rounded-md border-l-4 ${isMine ? 'border-blue-400 bg-blue-600/20' : 'border-gray-500 bg-gray-700/20'} overflow-hidden`}>
+        <div className="flex items-center gap-1 text-[10px] font-bold opacity-80 uppercase tracking-wider mb-0.5">
+            <Clock className="w-3 h-3" />
+            {eventInfo.timeText}
+        </div>
+        <div className="font-bold text-xs truncate leading-tight">{eventInfo.event.title}</div>
+        {eventInfo.event.extendedProps.nom_salle && (
+            <div className="text-[9px] mt-1 flex items-center gap-1 opacity-70 truncate">
+                <MapPin className="w-2.5 h-2.5" /> {eventInfo.event.extendedProps.nom_salle}
+            </div>
+        )}
+      </div>
+    );
+}
+
 export default function EmployeDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
-  // Données Globales
+  // Données
   const [allSalles, setAllSalles] = useState<any[]>([]);
   const [allRessources, setAllRessources] = useState<any[]>([]);
-  
-  // Données Filtrées
   const [dispoSalles, setDispoSalles] = useState<any[]>([]);
   const [dispoRessources, setDispoRessources] = useState<any[]>([]);
   const [checkingDispo, setCheckingDispo] = useState(false);
@@ -42,19 +59,21 @@ export default function EmployeDashboard() {
   const [events, setEvents] = useState<any[]>([]);
   const [mesProjets, setMesProjets] = useState<any[]>([]);
   const [mesTaches, setMesTaches] = useState<any[]>([]);
+  const [mesNotes, setMesNotes] = useState<any[]>([]);
   const [employesList, setEmployesList] = useState<any[]>([]); 
 
   const [stats, setStats] = useState({ projets: 0, reservations: 0, taches: 0 });
 
   const [showModalEvent, setShowModalEvent] = useState(false);
   const [showModalProjets, setShowModalProjets] = useState(false);
-  const [showModalReunions, setShowModalReunions] = useState(false);
   const [showModalAssignTask, setShowModalAssignTask] = useState(false);
 
   const [editMode, setEditMode] = useState(false);
   const [displayEvent, setDisplayEvent] = useState<any>({});
   const [formData, setFormData] = useState({ id: "", objet: "", start: "", end: "", id_salle: "", id_ressource: "" });
   const [taskForm, setTaskForm] = useState({ titre: "", id_assigne_a: "", id_projet: "" });
+  const [noteInput, setNoteInput] = useState("");
+  const [noteToPlanId, setNoteToPlanId] = useState<string | null>(null);
 
   const [projetCible, setProjetCible] = useState<any>(null);
   const [equipeProjet, setEquipeProjet] = useState<any[]>([]);
@@ -72,7 +91,6 @@ export default function EmployeDashboard() {
     checkSession();
   }, [router]);
 
-  // EFFET DE VÉRIFICATION DISPO
   useEffect(() => {
       if (showModalEvent && editMode && formData.start && formData.end) {
           checkAvailability();
@@ -87,7 +105,6 @@ export default function EmployeDashboard() {
               end: new Date(formData.end).toISOString(),
               ignoreId: formData.id || "" 
           });
-          
           const res = await fetch(`/api/disponibilites?${params}`);
           if (res.ok) {
               const data = await res.json();
@@ -105,14 +122,15 @@ export default function EmployeDashboard() {
         fetch(`/api/employes/${userId}/projets`).then(r => r.json()),
         fetch("/api/salles").then(r => r.json()),
         fetch("/api/ressources?etat=DISPONIBLE").then(r => r.json()),
-        fetch(`/api/taches?userId=${userId}`).then(r => r.json())
+        fetch(`/api/taches?userId=${userId}`).then(r => r.json()),
+        fetch(`/api/notes?userId=${userId}`).then(r => r.json())
     ];
 
     if (canAssignTasks(role)) {
         promises.push(fetch("/api/employes").then(r => r.json()));
     }
 
-    const [resas, projets, sallesData, ressourcesData, tachesData, allEmployes] = await Promise.all(promises);
+    const [resas, projets, sallesData, ressourcesData, tachesData, notesData, allEmployes] = await Promise.all(promises);
 
     setAllSalles(sallesData);
     setAllRessources(ressourcesData);
@@ -121,6 +139,7 @@ export default function EmployeDashboard() {
 
     setMesProjets(Array.isArray(projets) ? projets : []);
     setMesTaches(Array.isArray(tachesData) ? tachesData : []);
+    setMesNotes(Array.isArray(notesData) ? notesData : []);
     if (allEmployes) setEmployesList(allEmployes);
 
     setStats({
@@ -138,16 +157,54 @@ export default function EmployeDashboard() {
           const data = await res.json();
           const evts = data.map((evt: any) => ({
              id: evt.id_reservation,
-             title: `${evt.objet} - ${evt.salle?.nom_salle || 'Sans lieu'}`,
+             title: evt.objet, // On simplifie car le renderEventContent gère l'affichage
              start: evt.date_debut, end: evt.date_fin,
-             backgroundColor: evt.id_employe === userId ? '#3b82f6' : '#4b5563',
+             // On met transparent car on utilise un render custom, mais on garde la bordure pour le drag
+             backgroundColor: 'transparent', 
+             borderColor: 'transparent',
              editable: evt.id_employe === userId,
-             extendedProps: { ...evt, isMine: evt.id_employe === userId }
+             extendedProps: { 
+                 ...evt, 
+                 isMine: evt.id_employe === userId,
+                 nom_salle: evt.salle?.nom_salle || (evt.ressource ? evt.ressource.nom_ressource : null)
+             }
           }));
           setEvents(evts);
           return evts;
       }
       return [];
+  };
+
+  // --- HANDLERS (Identiques à avant) ---
+  const handleAddNote = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if(!noteInput.trim()) return;
+      try {
+          const res = await fetch("/api/notes", {
+              method: "POST", headers: {"Content-Type":"application/json"},
+              body: JSON.stringify({ contenu: noteInput, id_employe: user.id_employe })
+          });
+          if(res.ok) {
+              setNoteInput("");
+              const newNotes = await fetch(`/api/notes?userId=${user.id_employe}`).then(r => r.json());
+              setMesNotes(newNotes);
+              toast.success("Note ajoutée");
+          }
+      } catch(e) { toast.error("Erreur"); }
+  };
+
+  const handleDeleteNote = async (id_note: string) => {
+      await fetch(`/api/notes?id=${id_note}`, { method: "DELETE" });
+      setMesNotes(mesNotes.filter(n => n.id_note !== id_note));
+  };
+
+  const handlePlanNote = (note: any) => {
+      const now = new Date();
+      const end = new Date(now.getTime() + 60*60*1000); 
+      setFormData({ id: "", objet: note.contenu, start: formatForInput(now), end: formatForInput(end), id_salle: "", id_ressource: "" });
+      setNoteToPlanId(note.id_note);
+      setEditMode(true);
+      setShowModalEvent(true);
   };
 
   const handlePlanTask = (tache: any) => {
@@ -172,11 +229,7 @@ export default function EmployeDashboard() {
           const res = await fetch(`/api/projets/${projet.id_projet}/membres`);
           if (res.ok) {
               const membres = await res.json();
-              
-              // 🛡️ FIX : On enlève les doublons éventuels renvoyés par l'API
               const uniqueMembres = membres.filter((v:any,i:any,a:any)=>a.findIndex((t:any)=>(t.id_employe===v.id_employe))===i);
-              
-              // On filtre pour ne pas s'assigner à soi-même
               setEquipeProjet(uniqueMembres.filter((m: any) => m.id_employe !== user.id_employe));
               setShowModalAssignTask(true);
           }
@@ -188,8 +241,7 @@ export default function EmployeDashboard() {
       if (!projetCible) return;
       try {
           const res = await fetch("/api/taches", { 
-              method: "POST", 
-              headers: {"Content-Type":"application/json"}, 
+              method: "POST", headers: {"Content-Type":"application/json"}, 
               body: JSON.stringify({ ...taskForm, id_projet: projetCible.id_projet, id_assigne_par: user.id_employe }) 
           });
           if(res.ok) { toast.success("Tâche envoyée !"); setShowModalAssignTask(false); }
@@ -210,9 +262,15 @@ export default function EmployeDashboard() {
       e.preventDefault();
       try {
           const payload = { ...formData, date_debut: new Date(formData.start).toISOString(), date_fin: new Date(formData.end).toISOString() };
-          const res = await fetch("/api/reservations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, id_reservation: formData.id }) });
-          if(res.ok) { toast.success("Modifié !"); loadData(user.id_employe, user.role); setShowModalEvent(false); }
-          else { toast.error("Conflit ou erreur !"); }
+          const method = formData.id ? "PUT" : "POST";
+          const bodyPayload = formData.id ? { ...payload, id_reservation: formData.id } : { ...payload, id_employe: user.id_employe };
+          const res = await fetch("/api/reservations", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(bodyPayload) });
+          if(res.ok) { 
+              toast.success(formData.id ? "Modifié !" : "Créé !"); 
+              if (noteToPlanId) { await handleDeleteNote(noteToPlanId); setNoteToPlanId(null); }
+              loadData(user.id_employe, user.role); 
+              setShowModalEvent(false); 
+          } else { toast.error("Conflit ou erreur !"); }
       } catch (err) { toast.error("Erreur"); }
   };
 
@@ -239,60 +297,217 @@ export default function EmployeDashboard() {
   const Container = editMode ? 'form' : 'div';
 
   return (
-    <div className="min-h-screen bg-[#030712] text-gray-200 p-6 md:p-10">
-      <div className="max-w-[1600px] mx-auto space-y-8 animate-fade-in">
+    <div className="min-h-screen bg-[#030712] text-gray-200 p-6 md:p-8 flex flex-col">
+      
+      {/* 🌟 CSS MAGIQUE POUR FULLCALENDAR */}
+      <style jsx global>{`
+        /* Personnalisation Globale */
+        .fc { 
+            font-family: 'Inter', sans-serif; 
+            border: none !important; 
+        }
         
-        {/* HEADER */}
-        <header className="flex flex-col md:flex-row justify-between items-center glass-panel p-6 rounded-2xl shadow-lg border border-white/5">
-             <div className="flex items-center gap-4"><Image src="/logo.png" alt="Logo" width={48} height={48}/><h1 className="text-2xl font-bold text-white">Espace {user.role === 'CHEF_DE_PROJET' ? 'Chef de Projet' : user.role === 'RH' ? 'Ressources Humaines' : 'Employé'}</h1></div>
-             <div className="flex gap-3">
-                {canAccessAdminPanel(user.role) && <button onClick={() => router.push('/admin/dashboard')} className="px-4 py-2 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 font-bold flex items-center gap-2"><ShieldCheck className="w-4 h-4"/> Admin</button>}
-                <button onClick={() => router.push('/employe/profile')} className="px-4 py-2 rounded-xl border border-white/10 hover:bg-white/5 font-bold text-gray-300 flex items-center gap-2"><Settings className="w-4 h-4"/> Profil</button>
-                <button onClick={handleLogout} className="btn-neon-red px-4 py-2 rounded-xl font-bold flex items-center gap-2"><LogOut className="w-4 h-4"/> Déco</button>
-            </div>
+        /* HEADER TOOLBAR */
+        .fc-toolbar-title { 
+            font-size: 1.8rem !important; 
+            font-weight: 800; 
+            background: linear-gradient(to right, #60a5fa, #a78bfa); 
+            -webkit-background-clip: text; 
+            color: transparent; 
+            text-transform: capitalize;
+        }
+        
+        /* Boutons Navigation */
+        .fc-button-primary { 
+            background-color: rgba(255, 255, 255, 0.05) !important; 
+            border: 1px solid rgba(255, 255, 255, 0.1) !important; 
+            color: white !important; 
+            font-weight: 600; 
+            border-radius: 9999px !important; 
+            padding: 8px 16px !important; 
+            transition: all 0.2s;
+        }
+        .fc-button-primary:hover { 
+            background-color: rgba(59, 130, 246, 0.2) !important; 
+            border-color: #3b82f6 !important; 
+        }
+        .fc-button-active { 
+            background-color: #2563EB !important; 
+            border-color: #2563EB !important; 
+            box-shadow: 0 0 15px rgba(37,99,235,0.4);
+        }
+
+        /* GRILLE ET CELLULES */
+        .fc-theme-standard td, .fc-theme-standard th { 
+            border-color: rgba(255,255,255,0.03) !important; 
+        }
+        .fc-timegrid-slot { 
+            height: 40px !important; /* Lignes plus hautes */
+        }
+        .fc-timegrid-slot-label { 
+            font-size: 0.75rem; 
+            color: #6b7280; 
+            font-weight: 500;
+        }
+        
+        /* INDICATEUR TEMPS ACTUEL */
+        .fc-timegrid-now-indicator-line { 
+            border-color: #ef4444; 
+            border-width: 2px; 
+            box-shadow: 0 0 10px #ef4444; /* Effet Laser Néon */
+        }
+        .fc-timegrid-now-indicator-arrow { 
+            border-color: #ef4444; 
+            border-width: 6px; 
+        }
+
+        /* JOUR ACTUEL */
+        .fc-day-today { 
+            background-color: rgba(59, 130, 246, 0.03) !important; 
+        }
+
+        /* ENTÊTES DE COLONNES */
+        .fc-col-header-cell-cushion { 
+            color: #e5e7eb; 
+            padding: 15px 0 !important; 
+            font-weight: 700; 
+            text-transform: uppercase; 
+            font-size: 0.85rem; 
+            letter-spacing: 0.05em; 
+        }
+
+        /* ÉVÉNEMENTS */
+        .fc-event { 
+            background: transparent !important; 
+            border: none !important; 
+            box-shadow: none !important;
+        }
+      `}</style>
+
+      <div className="max-w-[1920px] mx-auto w-full space-y-6 animate-fade-in flex-1 flex flex-col">
+        
+        {/* HEADER COMPACT */}
+        <header className="flex justify-between items-center glass-panel px-6 py-4 rounded-2xl border border-white/5">
+             <div className="flex items-center gap-4">
+                <div className="relative h-10 w-10"><Image src="/logo.png" alt="Logo" width={40} height={40} className="object-contain"/></div>
+                <div>
+                    <h1 className="text-xl font-bold text-white tracking-tight">Nexus<span className="text-blue-500">Pharm</span></h1>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Espace {user.role?.replace('_', ' ')}</p>
+                </div>
+             </div>
+             <div className="flex gap-2">
+                {canAccessAdminPanel(user.role) && <button onClick={() => router.push('/admin/dashboard')} className="px-4 py-2 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 font-bold flex items-center gap-2 hover:bg-purple-600/20 transition"><ShieldCheck className="w-4 h-4"/> Admin</button>}
+                <button onClick={() => router.push('/employe/profile')} className="p-2 rounded-xl border border-white/10 hover:bg-white/5 text-gray-300 transition"><Settings className="w-5 h-5"/></button>
+                <button onClick={handleLogout} className="p-2 rounded-xl border border-red-500/20 hover:bg-red-500/10 text-red-400 transition"><LogOut className="w-5 h-5"/></button>
+             </div>
         </header>
 
-        {/* WIDGETS */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="glass-panel p-5 rounded-2xl border-l-4 border-orange-500 flex items-center justify-between"><div><p className="text-xs text-orange-400 font-bold uppercase">Mes Tâches</p><p className="text-3xl font-bold text-white">{stats.taches}</p></div><div className="p-3 bg-orange-500/10 rounded-xl text-orange-500"><BellRing className="w-6 h-6" /></div></div>
-            <div onClick={() => setShowModalProjets(true)} className="glass-panel p-5 rounded-2xl border-l-4 border-blue-500 cursor-pointer hover:bg-white/5"><div><p className="text-xs text-blue-400 font-bold uppercase">Projets</p><p className="text-3xl font-bold text-white">{stats.projets}</p></div></div>
-            <div onClick={() => router.push('/employe/reservations')} className="glass-panel p-1 rounded-2xl border border-white/10 hover:border-blue-500/50 cursor-pointer transition active:scale-95"><div className="h-full flex flex-col items-center justify-center p-4"><div className="mb-2 p-3 bg-white/5 rounded-full text-blue-400"><Plus className="w-6 h-6" /></div><span className="text-sm font-bold text-gray-300">Réserver</span></div></div>
-            <div onClick={() => router.push('/employe/incidents')} className="glass-panel p-1 rounded-2xl border border-white/10 hover:border-red-500/50 cursor-pointer transition active:scale-95"><div className="h-full flex flex-col items-center justify-center p-4"><div className="mb-2 p-3 bg-white/5 rounded-full text-red-400"><AlertTriangle className="w-6 h-6" /></div><span className="text-sm font-bold text-gray-300">Signaler</span></div></div>
-        </div>
-
-        {/* MAIN */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            <div className="lg:col-span-1 glass-panel p-6 rounded-2xl border border-white/10 h-[750px] overflow-y-auto">
-                <h3 className="font-bold text-white mb-4 flex items-center gap-2"><BellRing className="w-4 h-4 text-orange-400"/> À faire</h3>
-                <div className="space-y-3">
-                    {mesTaches.filter(t => t.statut === 'A_FAIRE').length === 0 && <p className="text-gray-500 text-sm italic">Aucune tâche.</p>}
-                    {mesTaches.filter(t => t.statut === 'A_FAIRE').map(t => (
-                        <div key={t.id_tache} className="p-4 bg-white/5 rounded-xl border border-white/5 hover:border-orange-500/30 transition group">
-                            <p className="text-white font-bold text-sm">{t.titre}</p>
-                            <p className="text-xs text-gray-400 mt-1">Par : {t.assigne_par.prenom}</p>
-                            {t.projet && <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded mt-2 inline-block">{t.projet.nom_projet}</span>}
-                            <div className="flex gap-2 mt-3 pt-3 border-t border-white/5">
-                                <button onClick={() => handlePlanTask(t)} className="flex-1 text-xs bg-blue-600/20 text-blue-400 py-1.5 rounded hover:bg-blue-600/30 font-bold flex items-center justify-center gap-1"><Calendar className="w-3 h-3"/> Planifier</button>
-                                <button onClick={() => handleFinishTask(t.id_tache)} className="flex-1 text-xs bg-green-600/20 text-green-400 py-1.5 rounded hover:bg-green-600/30 font-bold flex items-center justify-center gap-1"><CheckCircle2 className="w-3 h-3"/> Fait</button>
-                            </div>
-                        </div>
-                    ))}
+        {/* LAYOUT PRINCIPAL : SIDEBAR + CALENDRIER */}
+        <div className="flex flex-col lg:flex-row gap-6 h-full flex-1">
+            
+            {/* SIDEBAR (WIDGETS) */}
+            <div className="lg:w-[320px] space-y-4 flex flex-col h-full">
+                
+                {/* STATS RAPIDES */}
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="glass-panel p-4 rounded-xl border-l-2 border-blue-500 bg-gradient-to-br from-blue-500/5 to-transparent">
+                        <p className="text-[10px] text-blue-400 font-bold uppercase mb-1">Projets</p>
+                        <p className="text-2xl font-bold text-white">{stats.projets}</p>
+                    </div>
+                    <div className="glass-panel p-4 rounded-xl border-l-2 border-orange-500 bg-gradient-to-br from-orange-500/5 to-transparent">
+                        <p className="text-[10px] text-orange-400 font-bold uppercase mb-1">Tâches</p>
+                        <p className="text-2xl font-bold text-white">{stats.taches}</p>
+                    </div>
                 </div>
+
+                {/* BOUTONS ACTIONS */}
+                <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => router.push('/employe/reservations')} className="p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-blue-900/20"><Plus className="w-4 h-4"/> Réserver</button>
+                    <button onClick={() => router.push('/employe/incidents')} className="p-3 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition border border-white/5"><AlertTriangle className="w-4 h-4"/> Signaler</button>
+                </div>
+
+                {/* NOTES PERSO */}
+                <div className="glass-panel p-5 rounded-2xl border border-white/10 flex-1 min-h-[200px] flex flex-col">
+                    <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2"><StickyNote className="w-4 h-4 text-yellow-400"/> Notes Rapides</h3>
+                    <form onSubmit={handleAddNote} className="flex gap-2 mb-3">
+                        <input type="text" className="glass-input w-full text-xs py-2" placeholder="Ajouter une note..." value={noteInput} onChange={e => setNoteInput(e.target.value)} />
+                        <button type="submit" className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition"><Plus className="w-4 h-4"/></button>
+                    </form>
+                    <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+                        {mesNotes.length === 0 && <p className="text-gray-600 text-xs italic text-center mt-4">Aucune note.</p>}
+                        {mesNotes.map(note => (
+                            <div key={note.id_note} className="p-3 bg-white/5 rounded-lg border border-white/5 flex justify-between items-start group hover:border-blue-500/30 transition">
+                                <p className="text-gray-300 text-xs leading-relaxed">{note.contenu}</p>
+                                <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition ml-2">
+                                    <button onClick={() => handlePlanNote(note)} className="text-blue-400 hover:text-white"><Calendar className="w-3 h-3"/></button>
+                                    <button onClick={() => handleDeleteNote(note.id_note)} className="text-red-400 hover:text-white"><X className="w-3 h-3"/></button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* TÂCHES PM */}
+                <div className="glass-panel p-5 rounded-2xl border border-white/10 flex-1 min-h-[200px] flex flex-col">
+                    <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2"><BellRing className="w-4 h-4 text-orange-400"/> Tâches Assignées</h3>
+                    <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+                        {mesTaches.filter(t => t.statut === 'A_FAIRE').length === 0 && <p className="text-gray-600 text-xs italic text-center mt-4">Tout est à jour !</p>}
+                        {mesTaches.filter(t => t.statut === 'A_FAIRE').map(t => (
+                            <div key={t.id_tache} className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-orange-500/30 transition">
+                                <div className="flex justify-between">
+                                    <p className="text-white font-bold text-xs">{t.titre}</p>
+                                    {t.projet && <span className="text-[9px] bg-blue-500/10 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/20">{t.projet.nom_projet}</span>}
+                                </div>
+                                <p className="text-[10px] text-gray-500 mt-1">De : {t.assigne_par.prenom}</p>
+                                <div className="flex gap-2 mt-2">
+                                    <button onClick={() => handlePlanTask(t)} className="flex-1 text-[10px] bg-blue-600/10 text-blue-400 py-1 rounded hover:bg-blue-600/20 border border-blue-500/20">Planifier</button>
+                                    <button onClick={() => handleFinishTask(t.id_tache)} className="flex-1 text-[10px] bg-green-600/10 text-green-400 py-1 rounded hover:bg-green-600/20 border border-green-500/20">Fait</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* BOUTON PROJETS */}
+                <button onClick={() => setShowModalProjets(true)} className="glass-panel p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition group w-full text-left">
+                    <span className="text-sm font-bold text-gray-300 group-hover:text-white">Voir mes Projets</span>
+                    <FolderOpen className="w-5 h-5 text-gray-500 group-hover:text-blue-400 transition"/>
+                </button>
+
             </div>
 
-            <div className="lg:col-span-3 glass-panel p-6 rounded-2xl border border-white/10">
-                 <FullCalendar plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]} initialView="timeGridWeek" locale={frLocale} events={events} eventClick={handleEventClick} eventDrop={handleEventDropOrResize} eventResize={handleEventDropOrResize} height="100%" />
+            {/* ZONE CALENDRIER (IMMENSE & SEXY) */}
+            <div className="flex-1 glass-panel p-1 rounded-2xl shadow-2xl border border-white/10 overflow-hidden relative">
+                 <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a] via-[#0f172a] to-blue-900/10 pointer-events-none"></div>
+                 <div className="relative h-full">
+                    <FullCalendar 
+                        plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]} 
+                        initialView="timeGridWeek" 
+                        locale={frLocale} 
+                        events={events} 
+                        eventClick={handleEventClick} 
+                        eventDrop={handleEventDropOrResize} 
+                        eventResize={handleEventDropOrResize} 
+                        height="85vh" // 🔥 HAUTEUR BOOSTÉE
+                        slotMinTime="07:00:00"
+                        slotMaxTime="22:00:00"
+                        allDaySlot={false}
+                        headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' }}
+                        eventContent={renderEventContent} // 🔥 RENDU CUSTOM
+                        nowIndicator={true}
+                    />
+                 </div>
             </div>
         </div>
 
-        {/* MODALE PROJETS */}
+        {/* --- MODALES (Code inchangé mais essentiel) --- */}
         {showModalProjets && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowModalProjets(false)}>
                 <div className="glass-panel w-full max-w-2xl p-8 rounded-2xl border border-white/10 bg-[#0f172a] relative" onClick={e => e.stopPropagation()}>
                     <h2 className="text-2xl font-bold text-white mb-6">Mes Projets</h2>
-                    {mesProjets.map(p => (
+                    {mesProjets.length === 0 ? <p className="text-gray-500">Aucun projet.</p> : mesProjets.map(p => (
                         <div key={p.id_projet} className="p-4 bg-white/5 rounded-xl mb-4 flex justify-between items-center group hover:bg-white/10 transition">
-                            <div><h3 className="text-white font-bold">{p.nom_projet}</h3></div>
+                            <div><h3 className="text-white font-bold">{p.nom_projet}</h3><p className="text-xs text-gray-400">{p.description}</p></div>
                             {canAssignTasks(user.role) && (
                                 <button onClick={() => handleOpenAssign(p)} className="text-xs bg-orange-500/20 text-orange-400 px-3 py-2 rounded-lg font-bold hover:bg-orange-500/30 transition flex items-center gap-2"><Plus className="w-3 h-3"/> Assigner Tâche</button>
                             )}
@@ -303,7 +518,6 @@ export default function EmployeDashboard() {
             </div>
         )}
 
-        {/* MODALE ASSIGNATION */}
         {showModalAssignTask && projetCible && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
                 <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-orange-500/30 bg-[#0f172a] shadow-2xl relative">
@@ -312,24 +526,12 @@ export default function EmployeDashboard() {
                         <div><label className="text-xs font-bold text-gray-500">Titre</label><input type="text" required className="glass-input w-full" value={taskForm.titre} onChange={e => setTaskForm({...taskForm, titre: e.target.value})} placeholder="Ex: Faire la maquette..." /></div>
                         <div>
                             <label className="text-xs font-bold text-gray-500">Assigner à (Membre du projet)</label>
-                            
-                            {/* 🛡️ CORRECTION FINALE : Clé composite (id + index) pour éviter les doublons */}
-                            <select 
-                                className="glass-input w-full bg-[#0f172a]" 
-                                required 
-                                value={taskForm.id_assigne_a} 
-                                onChange={e => setTaskForm({...taskForm, id_assigne_a: e.target.value})}
-                            >
+                            <select className="glass-input w-full bg-[#0f172a]" required value={taskForm.id_assigne_a} onChange={e => setTaskForm({...taskForm, id_assigne_a: e.target.value})}>
                                 <option value="">Choisir un membre...</option>
-                                
                                 {Array.isArray(equipeProjet) && equipeProjet.map((emp: any, index: number) => (
-                                    <option key={`${emp.id_employe}-${index}`} value={emp.id_employe}>
-                                        {emp.nom} {emp.prenom} ({emp.role})
-                                    </option>
+                                    <option key={`${emp.id_employe}-${index}`} value={emp.id_employe}>{emp.nom} {emp.prenom} ({emp.role})</option>
                                 ))}
                             </select>
-                            
-                            {equipeProjet.length === 0 && <p className="text-[10px] text-red-400 mt-1">Aucun autre membre dans ce projet.</p>}
                         </div>
                         <button type="submit" className="w-full btn-neon-blue py-3 rounded-xl font-bold text-white">Envoyer</button>
                     </form>
@@ -338,7 +540,6 @@ export default function EmployeDashboard() {
             </div>
         )}
         
-        {/* MODALE EVENT */}
         {showModalEvent && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
                 <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative">
@@ -351,37 +552,10 @@ export default function EmployeDashboard() {
                              <div><label className="text-gray-500 text-xs font-bold">Fin</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs" value={formData.end} onChange={e => setFormData({...formData, end: e.target.value})}/> : <p className="text-gray-300 text-sm">{new Date(displayEvent.end).toLocaleString()}</p>}</div>
                         </div>
 
-                        {/* SELECTS INTELLIGENTS */}
                         {editMode && (
                             <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Salle</label>
-                                    <select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_salle} onChange={e => setFormData({...formData, id_salle: e.target.value, id_ressource: ""})}>
-                                        <option value="">Aucune</option>
-                                        {allSalles.map(s => {
-                                            const isDispo = dispoSalles.some((ds: any) => ds.id_salle === s.id_salle) || s.id_salle === formData.id_salle; // Dispo OU c'est celle qu'on a déjà
-                                            return (
-                                                <option key={s.id_salle} value={s.id_salle} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>
-                                                    {s.nom_salle} {!isDispo ? "(Occupé)" : ""}
-                                                </option>
-                                            )
-                                        })}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Matériel</label>
-                                    <select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_ressource} onChange={e => setFormData({...formData, id_ressource: e.target.value, id_salle: ""})}>
-                                        <option value="">Aucun</option>
-                                        {allRessources.map(r => {
-                                            const isDispo = dispoRessources.some((dr: any) => dr.id_ressource === r.id_ressource) || r.id_ressource === formData.id_ressource;
-                                            return (
-                                                <option key={r.id_ressource} value={r.id_ressource} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>
-                                                    {r.nom_ressource} {!isDispo ? "(Pris)" : ""}
-                                                </option>
-                                            )
-                                        })}
-                                    </select>
-                                </div>
+                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Salle</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_salle} onChange={e => setFormData({...formData, id_salle: e.target.value, id_ressource: ""})}><option value="">Aucune</option>{allSalles.map(s => { const isDispo = dispoSalles.some((ds: any) => ds.id_salle === s.id_salle) || s.id_salle === formData.id_salle; return <option key={s.id_salle} value={s.id_salle} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{s.nom_salle} {!isDispo ? "(Occupé)" : ""}</option>})}</select></div>
+                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Matériel</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_ressource} onChange={e => setFormData({...formData, id_ressource: e.target.value, id_salle: ""})}><option value="">Aucun</option>{allRessources.map(r => { const isDispo = dispoRessources.some((dr: any) => dr.id_ressource === r.id_ressource) || r.id_ressource === formData.id_ressource; return <option key={r.id_ressource} value={r.id_ressource} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{r.nom_ressource} {!isDispo ? "(Pris)" : ""}</option>})}</select></div>
                             </div>
                         )}
                         {editMode && checkingDispo && <p className="text-[10px] text-blue-400 animate-pulse text-center">Vérification disponibilités...</p>}
