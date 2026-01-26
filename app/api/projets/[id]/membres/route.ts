@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// GET /api/projets/[id]/membres
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+// ✅ CORRECTION : params est maintenant une Promise<{ id: string }>
+export async function GET(
+  req: Request, 
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    const { id } = params; // ID du projet
+    // ✅ CORRECTION : On doit attendre (await) la résolution des params
+    const { id } = await params; 
 
     // On cherche toutes les participations liées à ce projet
     const participations = await prisma.participationProjet.findMany({
