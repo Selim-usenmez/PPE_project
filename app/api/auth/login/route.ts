@@ -9,7 +9,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    const { email, password, rememberMe } = await req.json(); // rememberMe est reçu ici
+    const { email, password, rememberMe } = await req.json();
 
     // 1. Récupération User
     const user = await prisma.employe.findUnique({ where: { email } });
@@ -19,16 +19,34 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Identifiants incorrects" }, { status: 401 });
     }
 
+    // 🛑 3. SÉCURITÉ CRITIQUE : VÉRIFICATION DES DATES (AVANT TOUT LE RESTE)
+    // C'est ici qu'on bloque l'utilisateur, même s'il a un cookie de confiance.
+    const now = new Date();
+    
+    // Cas A : Compte pas encore actif (Date début future)
+    if (user.date_debut_validite && now < user.date_debut_validite) {
+        await createLog("CONNEXION_REFUSEE", `Tentative avant date début (${user.date_debut_validite})`, user.id_employe);
+        return NextResponse.json({ error: "Votre compte n'est pas encore actif." }, { status: 403 });
+    }
+
+    // Cas B : Compte expiré (Date fin passée)
+    if (user.date_fin_validite && now > user.date_fin_validite) {
+        await createLog("CONNEXION_REFUSEE", `Tentative après date fin (${user.date_fin_validite})`, user.id_employe);
+        return NextResponse.json({ error: "Votre compte a expiré. Contactez l'admin." }, { status: 403 });
+    }
+
+    // 4. Changement MDP obligatoire
     if (user.doit_changer_mdp) {
         return NextResponse.json({ requirePasswordChange: true, email: user.email });
     }
     
-    // 3. VÉRIFICATION DU COOKIE DE CONFIANCE (La magie opère ici)
+    // 5. COOKIE DE CONFIANCE (Trusted Device)
     const cookieStore = await cookies();
     const trustCookie = cookieStore.get(`trusted_device_${user.id_employe}`);
+    const SECRET = process.env.TRUST_DEVICE_SECRET || "SECRET_PAR_DEFAUT";
 
-    // Si le cookie existe ET qu'il est valide
-    if (trustCookie && trustCookie.value === process.env.TRUST_DEVICE_SECRET) {
+    // Si le cookie est valide, on connecte (MAIS on a déjà vérifié les dates juste au-dessus ✅)
+    if (trustCookie && trustCookie.value === SECRET) {
         
         const sessionData = {
             id_employe: user.id_employe,
@@ -38,12 +56,12 @@ export async function POST(req: Request) {
             email: user.email 
         };
 
-        await createLog("CONNEXION", "Connexion automatique (Appareil de confiance)", user.id_employe);
+        await createLog("CONNEXION", "Connexion auto (Appareil de confiance)", user.id_employe);
 
         const response = NextResponse.json({ success: true, ...sessionData });
 
-        // Durée de la session (30 jours si coché, sinon 24h)
-        const duration = rememberMe ? 30 * 24 * 60 * 60 : 24 * 60 * 60;
+        // Durée session (30 jours si confiance)
+        const duration = 30 * 24 * 60 * 60; 
 
         response.cookies.set("session_user", JSON.stringify(sessionData), { 
             httpOnly: true,
@@ -56,7 +74,7 @@ export async function POST(req: Request) {
         return response;
     }
 
-    // 4. SINON : ON DÉCLENCHE LE 2FA
+    // 6. SINON : ENVOI CODE 2FA
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -72,7 +90,6 @@ export async function POST(req: Request) {
       html: `<p>Votre code de connexion : <strong>${code}</strong></p>`
     });
 
-    // IMPORTANT : On renvoie l'info au front pour qu'il sache qu'il faudra traiter le rememberMe après
     return NextResponse.json({ require2fa: true, email: user.email });
 
   } catch (error) {

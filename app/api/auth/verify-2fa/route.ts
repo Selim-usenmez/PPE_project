@@ -5,7 +5,6 @@ import { createLog } from "@/lib/logger";
 
 export async function POST(req: Request) {
   try {
-    // 👇 On récupère 'rememberMe' ici aussi !
     const { email, code, rememberMe } = await req.json();
 
     const user = await prisma.employe.findUnique({ where: { email } });
@@ -14,18 +13,17 @@ export async function POST(req: Request) {
 
     // 1. Vérification du Code
     if (user.twoFactorCode !== code || !user.twoFactorExpires || new Date() > user.twoFactorExpires) {
-      // Log échec
       await createLog("CONNEXION_ECHEC", `Code 2FA invalide ou expiré pour ${email}`, user.id_employe);
       return NextResponse.json({ error: "Code invalide ou expiré" }, { status: 400 });
     }
 
-    // 2. Nettoyage du code en base (pour qu'il ne serve qu'une fois)
+    // 2. Nettoyage
     await prisma.employe.update({
       where: { id_employe: user.id_employe },
       data: { twoFactorCode: null, twoFactorExpires: null }
     });
 
-    // 3. Création de la Session
+    // 3. Session Data
     const sessionData = {
         id_employe: user.id_employe,
         nom: user.nom,
@@ -36,11 +34,13 @@ export async function POST(req: Request) {
 
     const response = NextResponse.json({ success: true, ...sessionData });
     const cookieStore = await cookies();
+    
+    // 👇 LA CORRECTION EST ICI : Même secret
+    const SECRET = process.env.TRUST_DEVICE_SECRET || "SECRET_PAR_DEFAUT";
 
-    // 4. GESTION DU "SE SOUVENIR DE MOI" (TRUST DEVICE)
+    // 4. GESTION DU "SE SOUVENIR DE MOI"
     if (rememberMe) {
-        // On crée un cookie spécial "Device de confiance" qui dure 30 jours
-        response.cookies.set(`trusted_device_${user.id_employe}`, process.env.TRUST_DEVICE_SECRET || "SECRET_PAR_DEFAUT", {
+        response.cookies.set(`trusted_device_${user.id_employe}`, SECRET, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: "lax",
@@ -53,8 +53,8 @@ export async function POST(req: Request) {
         await createLog("CONNEXION_2FA_SUCCESS", "Connexion temporaire", user.id_employe);
     }
 
-    // 5. Cookie de Session Classique
-    const sessionDuration = rememberMe ? 30 * 24 * 60 * 60 : 24 * 60 * 60; // 30 jours ou 24h
+    // 5. Cookie Session
+    const sessionDuration = rememberMe ? 30 * 24 * 60 * 60 : 24 * 60 * 60;
     response.cookies.set("session_user", JSON.stringify(sessionData), { 
         httpOnly: true,
         secure: process.env.NODE_ENV === "production", 
