@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { 
-  Settings, LogOut, Calendar, AlertTriangle, 
-  Briefcase, Clock, MapPin, Loader2, Plus, Trash2, Edit3, X, 
-  CalendarRange, FolderOpen, ShieldCheck, User, Box, Search 
+  Settings, LogOut, Calendar, AlertTriangle, Briefcase, Clock, MapPin, Loader2, 
+  Plus, Trash2, Edit3, X, CalendarRange, FolderOpen, ShieldCheck, User, Box, 
+  CheckCircle2, BellRing 
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -14,6 +14,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import frLocale from '@fullcalendar/core/locales/fr';
+import { can, canAssignTasks, canAccessAdminPanel } from "@/lib/permissions";
 
 const formatForInput = (d: any) => {
     if (!d) return "";
@@ -29,253 +30,379 @@ export default function EmployeDashboard() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
-  // Données
-  const [events, setEvents] = useState<any[]>([]);
-  const [salles, setSalles] = useState<any[]>([]);
-  const [ressources, setRessources] = useState<any[]>([]);
-  const [stats, setStats] = useState({ projets: 0, reservations: 0 });
-  const [mesProjets, setMesProjets] = useState<any[]>([]);
+  // Données Globales
+  const [allSalles, setAllSalles] = useState<any[]>([]);
+  const [allRessources, setAllRessources] = useState<any[]>([]);
+  
+  // Données Filtrées
+  const [dispoSalles, setDispoSalles] = useState<any[]>([]);
+  const [dispoRessources, setDispoRessources] = useState<any[]>([]);
+  const [checkingDispo, setCheckingDispo] = useState(false);
 
-  // États Modales
-  const [showModalEvent, setShowModalEvent] = useState(false); // Modale Détail/Edit
-  const [showModalProjets, setShowModalProjets] = useState(false); // Modale Liste Projets
-  const [showModalReunions, setShowModalReunions] = useState(false); // Modale Liste Réunions
+  const [events, setEvents] = useState<any[]>([]);
+  const [mesProjets, setMesProjets] = useState<any[]>([]);
+  const [mesTaches, setMesTaches] = useState<any[]>([]);
+  const [employesList, setEmployesList] = useState<any[]>([]); 
+
+  const [stats, setStats] = useState({ projets: 0, reservations: 0, taches: 0 });
+
+  const [showModalEvent, setShowModalEvent] = useState(false);
+  const [showModalProjets, setShowModalProjets] = useState(false);
+  const [showModalReunions, setShowModalReunions] = useState(false);
+  const [showModalAssignTask, setShowModalAssignTask] = useState(false);
 
   const [editMode, setEditMode] = useState(false);
-
-  const [displayEvent, setDisplayEvent] = useState({ title: "", nom_salle: "", nom_ressource: "", nom_projet: "", auteur: "", start: "", end: "", isMine: false });
+  const [displayEvent, setDisplayEvent] = useState<any>({});
   const [formData, setFormData] = useState({ id: "", objet: "", start: "", end: "", id_salle: "", id_ressource: "" });
+  const [taskForm, setTaskForm] = useState({ titre: "", id_assigne_a: "", id_projet: "" });
+
+  const [projetCible, setProjetCible] = useState<any>(null);
+  const [equipeProjet, setEquipeProjet] = useState<any[]>([]);
 
   useEffect(() => {
-    const stored = localStorage.getItem("user_info");
-    if (!stored) { router.push("/login"); return; }
-    try { const userData = JSON.parse(stored); setUser(userData); loadData(userData.id_employe, false); } catch(e) { router.push("/login"); }
+    const checkSession = async () => {
+        try {
+            const res = await fetch("/api/auth/session");
+            if (!res.ok) { localStorage.removeItem("user_info"); router.push("/login"); return; }
+            const updatedUser = await res.json();
+            setUser(updatedUser);
+            loadData(updatedUser.id_employe, updatedUser.role);
+        } catch (e) { router.push("/login"); }
+    };
+    checkSession();
   }, [router]);
 
-  const loadData = async (userId: string, isBackground = false) => {
-    if (!isBackground) setLoading(true);
-    await Promise.all([ 
-        fetchReservations(userId), 
-        fetchProjets(userId),
-        fetch("/api/salles").then(r => r.json()).then(setSalles),
-        fetch("/api/ressources?etat=DISPONIBLE").then(r => r.json()).then(setRessources)
-    ]);
-    if (!isBackground) setLoading(false);
-  };
+  // EFFET DE VÉRIFICATION DISPO
+  useEffect(() => {
+      if (showModalEvent && editMode && formData.start && formData.end) {
+          checkAvailability();
+      }
+  }, [formData.start, formData.end, showModalEvent, editMode]);
 
-  const fetchReservations = async (currentUserId: string) => {
-    try {
-        const res = await fetch(`/api/reservations?userId=${currentUserId}&refresh=${Date.now()}`, { cache: 'no-store' });
-        if (res.ok) {
-            const data = await res.json();
-            const formattedEvents = Array.isArray(data) ? data.map((evt: any) => {
-                const isMine = evt.id_employe === currentUserId;
-                const auteurNom = evt.employe ? `${evt.employe.prenom} ${evt.employe.nom}` : "Inconnu";
-                let locationLabel = "Sans lieu";
-                if (evt.salle) locationLabel = evt.salle.nom_salle;
-                else if (evt.ressource) locationLabel = evt.ressource.nom_ressource;
-
-                return {
-                    id: evt.id_reservation, 
-                    title: `${evt.objet} - ${locationLabel}`,
-                    start: evt.date_debut, 
-                    end: evt.date_fin,
-                    backgroundColor: isMine ? '#3b82f6' : '#4b5563', 
-                    borderColor: isMine ? '#2563eb' : '#374151',
-                    textColor: '#ffffff',
-                    editable: isMine,
-                    extendedProps: {
-                        objet: evt.objet,
-                        nom_salle: evt.salle?.nom_salle || null,
-                        nom_ressource: evt.ressource?.nom_ressource || null,
-                        nom_projet: evt.projet?.nom_projet || "Projet Inconnu",
-                        auteur: auteurNom,
-                        id_salle: evt.id_salle,
-                        id_ressource: evt.id_ressource,
-                        isMine: isMine
-                    }
-                };
-            }) : [];
-            setEvents(formattedEvents); setStats(prev => ({ ...prev, reservations: formattedEvents.length }));
-        }
-    } catch (e) { console.error(e); }
-  };
-
-  const fetchProjets = async (id: string) => {
-    try { const res = await fetch(`/api/employes/${id}/projets`); if (res.ok) { const data = await res.json(); setMesProjets(Array.isArray(data) ? data : []); setStats(prev => ({ ...prev, projets: (data as any[]).length })); } } catch (e) { console.error(e); }
-  };
-
-  const handleEventDropOrResize = async (info: any) => {
-      const { event } = info;
+  const checkAvailability = async () => {
+      setCheckingDispo(true);
       try {
-          const payload = {
-              id_reservation: event.id,
-              date_debut: event.start.toISOString(),
-              date_fin: event.end ? event.end.toISOString() : event.start.toISOString(),
-          };
-          const res = await fetch("/api/reservations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-          if (!res.ok) { const err = await res.json(); toast.error(err.error || "Impossible de déplacer"); info.revert(); } 
-          else { toast.success("Horaire modifié !"); }
-      } catch (e) { toast.error("Erreur serveur"); info.revert(); }
+          const params = new URLSearchParams({
+              start: new Date(formData.start).toISOString(),
+              end: new Date(formData.end).toISOString(),
+              ignoreId: formData.id || "" 
+          });
+          
+          const res = await fetch(`/api/disponibilites?${params}`);
+          if (res.ok) {
+              const data = await res.json();
+              setDispoSalles(data.salles);
+              setDispoRessources(data.ressources);
+          }
+      } catch (e) { console.error("Erreur dispo"); }
+      setCheckingDispo(false);
   };
 
-  const handleEventClick = (clickInfo: any) => {
-      const event = clickInfo.event; const props = event.extendedProps;
-      let startDate = event.start; let endDate = event.end;
-      if (!endDate) endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+  const loadData = async (userId: string, role: string) => {
+    setLoading(true);
+    const promises = [
+        fetchReservations(userId),
+        fetch(`/api/employes/${userId}/projets`).then(r => r.json()),
+        fetch("/api/salles").then(r => r.json()),
+        fetch("/api/ressources?etat=DISPONIBLE").then(r => r.json()),
+        fetch(`/api/taches?userId=${userId}`).then(r => r.json())
+    ];
 
-      setDisplayEvent({ title: props.objet, start: startDate, end: endDate, nom_salle: props.nom_salle, nom_ressource: props.nom_ressource, nom_projet: props.nom_projet, auteur: props.auteur, isMine: props.isMine });
-      setFormData({ id: event.id, objet: props.objet, start: formatForInput(startDate), end: formatForInput(endDate), id_salle: props.id_salle || "", id_ressource: props.id_ressource || "" });
-      setEditMode(false); setShowModalEvent(true);
+    if (canAssignTasks(role)) {
+        promises.push(fetch("/api/employes").then(r => r.json()));
+    }
+
+    const [resas, projets, sallesData, ressourcesData, tachesData, allEmployes] = await Promise.all(promises);
+
+    setAllSalles(sallesData);
+    setAllRessources(ressourcesData);
+    setDispoSalles(sallesData); 
+    setDispoRessources(ressourcesData);
+
+    setMesProjets(Array.isArray(projets) ? projets : []);
+    setMesTaches(Array.isArray(tachesData) ? tachesData : []);
+    if (allEmployes) setEmployesList(allEmployes);
+
+    setStats({
+        reservations: (resas as any)?.length || 0,
+        projets: (projets as any)?.length || 0,
+        taches: (tachesData as any)?.filter((t:any) => t.statut === 'A_FAIRE').length || 0
+    });
+
+    setLoading(false);
+  };
+
+  const fetchReservations = async (userId: string) => {
+      const res = await fetch(`/api/reservations?userId=${userId}&refresh=${Date.now()}`);
+      if(res.ok) {
+          const data = await res.json();
+          const evts = data.map((evt: any) => ({
+             id: evt.id_reservation,
+             title: `${evt.objet} - ${evt.salle?.nom_salle || 'Sans lieu'}`,
+             start: evt.date_debut, end: evt.date_fin,
+             backgroundColor: evt.id_employe === userId ? '#3b82f6' : '#4b5563',
+             editable: evt.id_employe === userId,
+             extendedProps: { ...evt, isMine: evt.id_employe === userId }
+          }));
+          setEvents(evts);
+          return evts;
+      }
+      return [];
+  };
+
+  const handlePlanTask = (tache: any) => {
+      const now = new Date();
+      const end = new Date(now.getTime() + 60*60*1000); 
+      setFormData({ id: "", objet: `Travail : ${tache.titre}`, start: formatForInput(now), end: formatForInput(end), id_salle: "", id_ressource: "" });
+      fetch("/api/taches", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id_tache: tache.id_tache, statut: "PLANIFIE" }) });
+      setEditMode(true);
+      setShowModalEvent(true);
+  };
+
+  const handleFinishTask = async (id_tache: string) => {
+      await fetch("/api/taches", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id_tache, statut: "TERMINE" }) });
+      toast.success("Tâche terminée !");
+      loadData(user.id_employe, user.role); 
+  };
+
+  const handleOpenAssign = async (projet: any) => {
+      setProjetCible(projet); 
+      setTaskForm({ titre: "", id_assigne_a: "", id_projet: "" });
+      try {
+          const res = await fetch(`/api/projets/${projet.id_projet}/membres`);
+          if (res.ok) {
+              const membres = await res.json();
+              
+              // 🛡️ FIX : On enlève les doublons éventuels renvoyés par l'API
+              const uniqueMembres = membres.filter((v:any,i:any,a:any)=>a.findIndex((t:any)=>(t.id_employe===v.id_employe))===i);
+              
+              // On filtre pour ne pas s'assigner à soi-même
+              setEquipeProjet(uniqueMembres.filter((m: any) => m.id_employe !== user.id_employe));
+              setShowModalAssignTask(true);
+          }
+      } catch(e) { toast.error("Erreur équipe"); }
+  };
+
+  const handleAssignTask = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!projetCible) return;
+      try {
+          const res = await fetch("/api/taches", { 
+              method: "POST", 
+              headers: {"Content-Type":"application/json"}, 
+              body: JSON.stringify({ ...taskForm, id_projet: projetCible.id_projet, id_assigne_par: user.id_employe }) 
+          });
+          if(res.ok) { toast.success("Tâche envoyée !"); setShowModalAssignTask(false); }
+          else { toast.error("Erreur"); }
+      } catch(err) { toast.error("Erreur"); }
+  };
+  
+  const handleEventClick = (info: any) => {
+      const event = info.event;
+      const props = event.extendedProps;
+      setDisplayEvent({ ...props, start: event.start, end: event.end, isMine: props.isMine });
+      setFormData({ id: event.id, objet: props.objet, start: formatForInput(event.start), end: formatForInput(event.end), id_salle: props.id_salle || "", id_ressource: props.id_ressource || "" });
+      setEditMode(false);
+      setShowModalEvent(true);
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
-      e.preventDefault(); e.stopPropagation();
-      if (!editMode) return;
+      e.preventDefault();
       try {
-          const payload = { id_reservation: formData.id, id_salle: formData.id_salle || null, id_ressource: formData.id_ressource || null, date_debut: new Date(formData.start).toISOString(), date_fin: new Date(formData.end).toISOString(), objet: formData.objet };
-          const res = await fetch("/api/reservations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-          if(res.ok) { toast.success("Mise à jour réussie !"); await loadData(user.id_employe, true); setEditMode(false); } else { const err = await res.json(); toast.error(err.error || "Erreur"); }
-      } catch (err) { toast.error("Erreur serveur"); }
+          const payload = { ...formData, date_debut: new Date(formData.start).toISOString(), date_fin: new Date(formData.end).toISOString() };
+          const res = await fetch("/api/reservations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, id_reservation: formData.id }) });
+          if(res.ok) { toast.success("Modifié !"); loadData(user.id_employe, user.role); setShowModalEvent(false); }
+          else { toast.error("Conflit ou erreur !"); }
+      } catch (err) { toast.error("Erreur"); }
   };
 
   const handleDelete = async () => {
-      if(!window.confirm("Supprimer cette réservation ?")) return;
-      try { const res = await fetch(`/api/reservations?id=${formData.id}`, { method: "DELETE" }); if(res.ok) { toast.success("Supprimé"); setShowModalEvent(false); loadData(user.id_employe, false); } else { toast.error("Erreur"); } } catch(err) { toast.error("Erreur serveur"); }
+      if(!window.confirm("Supprimer ?")) return;
+      await fetch(`/api/reservations?id=${formData.id}`, { method: "DELETE" });
+      loadData(user.id_employe, user.role);
+      setShowModalEvent(false);
+  };
+
+  const handleEventDropOrResize = async (info: any) => {
+      if (!info.event.extendedProps.isMine) { info.revert(); return; }
+      const payload = { id_reservation: info.event.id, date_debut: info.event.start.toISOString(), date_fin: info.event.end.toISOString() };
+      await fetch("/api/reservations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   };
 
   const handleLogout = async () => { await fetch("/api/auth/logout", { method: "POST" }); localStorage.removeItem("user_info"); router.push("/login"); };
+
   if (!user) return <div className="min-h-screen bg-[#030712] flex items-center justify-center"><Loader2 className="animate-spin text-white"/></div>;
 
+  const isOwner = displayEvent.isMine;
+  const canEdit = can(user.role, "RESERVATION", "UPDATE", isOwner);
+  const canDelete = can(user.role, "RESERVATION", "DELETE", isOwner);
   const Container = editMode ? 'form' : 'div';
 
   return (
     <div className="min-h-screen bg-[#030712] text-gray-200 p-6 md:p-10">
-      
-      {/* --- STYLES CALENDRIER PREMIUM --- */}
-      <style jsx global>{`
-        .fc { color: #9ca3af; font-family: 'Inter', sans-serif; }
-        .fc-theme-standard td, .fc-theme-standard th { border-color: rgba(255,255,255,0.05); }
-        .fc-toolbar-title { color: white; font-size: 1.5rem !important; font-weight: 800; }
-        .fc-button { background-color: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; color: white !important; font-weight: 600; text-transform: capitalize; border-radius: 8px !important; padding: 8px 16px !important; }
-        .fc-button:hover { background-color: rgba(59, 130, 246, 0.2) !important; border-color: #3b82f6 !important; color: white !important; }
-        .fc-button-active { background-color: #2563EB !important; border-color: #2563EB !important; color: white !important; }
-        .fc-timegrid-slot-label { color: #6b7280; font-size: 0.8rem; }
-        .fc-col-header-cell-cushion { color: #e5e7eb; padding: 10px 0 !important; font-weight: 600; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.05em; }
-        .fc-event { border: none; border-radius: 6px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); padding: 2px 4px; font-size: 0.85rem; font-weight: 500; }
-        .fc-timegrid-now-indicator-line { border-color: #ef4444; border-width: 2px; }
-        .fc-timegrid-now-indicator-arrow { border-color: #ef4444; border-width: 6px; }
-        .fc-day-today { background-color: rgba(59, 130, 246, 0.02) !important; }
-      `}</style>
-      
       <div className="max-w-[1600px] mx-auto space-y-8 animate-fade-in">
         
         {/* HEADER */}
         <header className="flex flex-col md:flex-row justify-between items-center glass-panel p-6 rounded-2xl shadow-lg border border-white/5">
-            <div className="flex items-center gap-4"><div className="relative h-12 w-12 flex-shrink-0"><Image src="/logo.png" alt="Logo" width={48} height={48} className="object-contain" priority /></div><div><h1 className="text-2xl font-bold text-white">Espace Employé</h1><p className="text-gray-400 text-sm">Bonjour, <span className="text-blue-400 font-bold">{user.prenom}</span>.</p></div></div>
-            <div className="flex gap-3 mt-4 md:mt-0">{user.role === "ADMIN" && (<button onClick={() => router.push('/admin/dashboard')} className="px-4 py-2 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 font-bold flex items-center gap-2"><ShieldCheck className="w-4 h-4" /> Vue Admin</button>)}<button onClick={() => router.push('/employe/profile')} className="px-4 py-2 rounded-xl border border-white/10 hover:bg-white/5 font-bold text-gray-300 flex items-center gap-2"><Settings className="w-4 h-4" /> Profil</button><button onClick={handleLogout} className="btn-neon-red px-4 py-2 rounded-xl font-bold flex items-center gap-2"><LogOut className="w-4 h-4" /> Déconnexion</button></div>
+             <div className="flex items-center gap-4"><Image src="/logo.png" alt="Logo" width={48} height={48}/><h1 className="text-2xl font-bold text-white">Espace {user.role === 'CHEF_DE_PROJET' ? 'Chef de Projet' : user.role === 'RH' ? 'Ressources Humaines' : 'Employé'}</h1></div>
+             <div className="flex gap-3">
+                {canAccessAdminPanel(user.role) && <button onClick={() => router.push('/admin/dashboard')} className="px-4 py-2 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 font-bold flex items-center gap-2"><ShieldCheck className="w-4 h-4"/> Admin</button>}
+                <button onClick={() => router.push('/employe/profile')} className="px-4 py-2 rounded-xl border border-white/10 hover:bg-white/5 font-bold text-gray-300 flex items-center gap-2"><Settings className="w-4 h-4"/> Profil</button>
+                <button onClick={handleLogout} className="btn-neon-red px-4 py-2 rounded-xl font-bold flex items-center gap-2"><LogOut className="w-4 h-4"/> Déco</button>
+            </div>
         </header>
 
-        {/* WIDGETS CLIQUABLES */}
+        {/* WIDGETS */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div onClick={() => setShowModalProjets(true)} className="glass-panel p-5 rounded-2xl border-l-4 border-blue-500 flex items-center justify-between cursor-pointer hover:bg-white/5 transition group">
-                <div><p className="text-xs text-blue-400 font-bold uppercase group-hover:text-blue-300 transition">Mes Projets</p><p className="text-3xl font-bold text-white">{stats.projets}</p></div>
-                <div className="p-3 bg-blue-500/10 rounded-xl text-blue-500 group-hover:bg-blue-500/20 transition"><Briefcase className="w-6 h-6" /></div>
-            </div>
-            
-            <div onClick={() => setShowModalReunions(true)} className="glass-panel p-5 rounded-2xl border-l-4 border-purple-500 flex items-center justify-between cursor-pointer hover:bg-white/5 transition group">
-                <div><p className="text-xs text-purple-400 font-bold uppercase group-hover:text-purple-300 transition">Réunions</p><p className="text-3xl font-bold text-white">{stats.reservations}</p></div>
-                <div className="p-3 bg-purple-500/10 rounded-xl text-purple-500 group-hover:bg-purple-500/20 transition"><CalendarRange className="w-6 h-6" /></div>
-            </div>
-            
+            <div className="glass-panel p-5 rounded-2xl border-l-4 border-orange-500 flex items-center justify-between"><div><p className="text-xs text-orange-400 font-bold uppercase">Mes Tâches</p><p className="text-3xl font-bold text-white">{stats.taches}</p></div><div className="p-3 bg-orange-500/10 rounded-xl text-orange-500"><BellRing className="w-6 h-6" /></div></div>
+            <div onClick={() => setShowModalProjets(true)} className="glass-panel p-5 rounded-2xl border-l-4 border-blue-500 cursor-pointer hover:bg-white/5"><div><p className="text-xs text-blue-400 font-bold uppercase">Projets</p><p className="text-3xl font-bold text-white">{stats.projets}</p></div></div>
             <div onClick={() => router.push('/employe/reservations')} className="glass-panel p-1 rounded-2xl border border-white/10 hover:border-blue-500/50 cursor-pointer transition active:scale-95"><div className="h-full flex flex-col items-center justify-center p-4"><div className="mb-2 p-3 bg-white/5 rounded-full text-blue-400"><Plus className="w-6 h-6" /></div><span className="text-sm font-bold text-gray-300">Réserver</span></div></div>
             <div onClick={() => router.push('/employe/incidents')} className="glass-panel p-1 rounded-2xl border border-white/10 hover:border-red-500/50 cursor-pointer transition active:scale-95"><div className="h-full flex flex-col items-center justify-center p-4"><div className="mb-2 p-3 bg-white/5 rounded-full text-red-400"><AlertTriangle className="w-6 h-6" /></div><span className="text-sm font-bold text-gray-300">Signaler</span></div></div>
         </div>
 
-        {/* CALENDRIER PLEINE LARGEUR */}
-        <div className="glass-panel p-6 rounded-2xl shadow-2xl border border-white/10">
-            <div className="h-[750px] overflow-hidden rounded-xl bg-[#0f172a]/40 border border-white/5">
-                <FullCalendar 
-                    plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]} 
-                    initialView="timeGridWeek" 
-                    locale={frLocale} 
-                    events={events} 
-                    eventClick={handleEventClick} 
-                    eventDrop={handleEventDropOrResize} 
-                    eventResize={handleEventDropOrResize} 
-                    editable={true} 
-                    nowIndicator={true} 
-                    allDaySlot={false} 
-                    slotMinTime="07:00:00" 
-                    slotMaxTime="21:00:00" 
-                    height="100%"
-                    headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' }} 
-                />
+        {/* MAIN */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            <div className="lg:col-span-1 glass-panel p-6 rounded-2xl border border-white/10 h-[750px] overflow-y-auto">
+                <h3 className="font-bold text-white mb-4 flex items-center gap-2"><BellRing className="w-4 h-4 text-orange-400"/> À faire</h3>
+                <div className="space-y-3">
+                    {mesTaches.filter(t => t.statut === 'A_FAIRE').length === 0 && <p className="text-gray-500 text-sm italic">Aucune tâche.</p>}
+                    {mesTaches.filter(t => t.statut === 'A_FAIRE').map(t => (
+                        <div key={t.id_tache} className="p-4 bg-white/5 rounded-xl border border-white/5 hover:border-orange-500/30 transition group">
+                            <p className="text-white font-bold text-sm">{t.titre}</p>
+                            <p className="text-xs text-gray-400 mt-1">Par : {t.assigne_par.prenom}</p>
+                            {t.projet && <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded mt-2 inline-block">{t.projet.nom_projet}</span>}
+                            <div className="flex gap-2 mt-3 pt-3 border-t border-white/5">
+                                <button onClick={() => handlePlanTask(t)} className="flex-1 text-xs bg-blue-600/20 text-blue-400 py-1.5 rounded hover:bg-blue-600/30 font-bold flex items-center justify-center gap-1"><Calendar className="w-3 h-3"/> Planifier</button>
+                                <button onClick={() => handleFinishTask(t.id_tache)} className="flex-1 text-xs bg-green-600/20 text-green-400 py-1.5 rounded hover:bg-green-600/30 font-bold flex items-center justify-center gap-1"><CheckCircle2 className="w-3 h-3"/> Fait</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            <div className="lg:col-span-3 glass-panel p-6 rounded-2xl border border-white/10">
+                 <FullCalendar plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]} initialView="timeGridWeek" locale={frLocale} events={events} eventClick={handleEventClick} eventDrop={handleEventDropOrResize} eventResize={handleEventDropOrResize} height="100%" />
             </div>
         </div>
 
+        {/* MODALE PROJETS */}
+        {showModalProjets && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowModalProjets(false)}>
+                <div className="glass-panel w-full max-w-2xl p-8 rounded-2xl border border-white/10 bg-[#0f172a] relative" onClick={e => e.stopPropagation()}>
+                    <h2 className="text-2xl font-bold text-white mb-6">Mes Projets</h2>
+                    {mesProjets.map(p => (
+                        <div key={p.id_projet} className="p-4 bg-white/5 rounded-xl mb-4 flex justify-between items-center group hover:bg-white/10 transition">
+                            <div><h3 className="text-white font-bold">{p.nom_projet}</h3></div>
+                            {canAssignTasks(user.role) && (
+                                <button onClick={() => handleOpenAssign(p)} className="text-xs bg-orange-500/20 text-orange-400 px-3 py-2 rounded-lg font-bold hover:bg-orange-500/30 transition flex items-center gap-2"><Plus className="w-3 h-3"/> Assigner Tâche</button>
+                            )}
+                        </div>
+                    ))}
+                    <button onClick={() => setShowModalProjets(false)} className="absolute top-4 right-4 text-gray-400"><X/></button>
+                </div>
+            </div>
+        )}
+
+        {/* MODALE ASSIGNATION */}
+        {showModalAssignTask && projetCible && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+                <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-orange-500/30 bg-[#0f172a] shadow-2xl relative">
+                    <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Briefcase className="w-5 h-5 text-orange-500"/> Tâche : {projetCible.nom_projet}</h2>
+                    <form onSubmit={handleAssignTask} className="space-y-4">
+                        <div><label className="text-xs font-bold text-gray-500">Titre</label><input type="text" required className="glass-input w-full" value={taskForm.titre} onChange={e => setTaskForm({...taskForm, titre: e.target.value})} placeholder="Ex: Faire la maquette..." /></div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500">Assigner à (Membre du projet)</label>
+                            
+                            {/* 🛡️ CORRECTION FINALE : Clé composite (id + index) pour éviter les doublons */}
+                            <select 
+                                className="glass-input w-full bg-[#0f172a]" 
+                                required 
+                                value={taskForm.id_assigne_a} 
+                                onChange={e => setTaskForm({...taskForm, id_assigne_a: e.target.value})}
+                            >
+                                <option value="">Choisir un membre...</option>
+                                
+                                {Array.isArray(equipeProjet) && equipeProjet.map((emp: any, index: number) => (
+                                    <option key={`${emp.id_employe}-${index}`} value={emp.id_employe}>
+                                        {emp.nom} {emp.prenom} ({emp.role})
+                                    </option>
+                                ))}
+                            </select>
+                            
+                            {equipeProjet.length === 0 && <p className="text-[10px] text-red-400 mt-1">Aucun autre membre dans ce projet.</p>}
+                        </div>
+                        <button type="submit" className="w-full btn-neon-blue py-3 rounded-xl font-bold text-white">Envoyer</button>
+                    </form>
+                    <button onClick={() => setShowModalAssignTask(false)} className="absolute top-4 right-4 text-gray-400"><X/></button>
+                </div>
+            </div>
+        )}
+        
+        {/* MODALE EVENT */}
+        {showModalEvent && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative">
+                     {/* @ts-ignore */}
+                     <Container onSubmit={editMode ? handleUpdate : undefined} className="space-y-5">
+                        <div><label className="text-gray-500 text-xs font-bold uppercase">Objet</label>{editMode ? <input className="glass-input w-full" value={formData.objet} onChange={e => setFormData({...formData, objet: e.target.value})} /> : <p className="text-white font-bold">{displayEvent.title}</p>}</div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                             <div><label className="text-gray-500 text-xs font-bold">Début</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs" value={formData.start} onChange={e => setFormData({...formData, start: e.target.value})}/> : <p className="text-gray-300 text-sm">{new Date(displayEvent.start).toLocaleString()}</p>}</div>
+                             <div><label className="text-gray-500 text-xs font-bold">Fin</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs" value={formData.end} onChange={e => setFormData({...formData, end: e.target.value})}/> : <p className="text-gray-300 text-sm">{new Date(displayEvent.end).toLocaleString()}</p>}</div>
+                        </div>
+
+                        {/* SELECTS INTELLIGENTS */}
+                        {editMode && (
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Salle</label>
+                                    <select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_salle} onChange={e => setFormData({...formData, id_salle: e.target.value, id_ressource: ""})}>
+                                        <option value="">Aucune</option>
+                                        {allSalles.map(s => {
+                                            const isDispo = dispoSalles.some((ds: any) => ds.id_salle === s.id_salle) || s.id_salle === formData.id_salle; // Dispo OU c'est celle qu'on a déjà
+                                            return (
+                                                <option key={s.id_salle} value={s.id_salle} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>
+                                                    {s.nom_salle} {!isDispo ? "(Occupé)" : ""}
+                                                </option>
+                                            )
+                                        })}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Matériel</label>
+                                    <select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_ressource} onChange={e => setFormData({...formData, id_ressource: e.target.value, id_salle: ""})}>
+                                        <option value="">Aucun</option>
+                                        {allRessources.map(r => {
+                                            const isDispo = dispoRessources.some((dr: any) => dr.id_ressource === r.id_ressource) || r.id_ressource === formData.id_ressource;
+                                            return (
+                                                <option key={r.id_ressource} value={r.id_ressource} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>
+                                                    {r.nom_ressource} {!isDispo ? "(Pris)" : ""}
+                                                </option>
+                                            )
+                                        })}
+                                    </select>
+                                </div>
+                            </div>
+                        )}
+                        {editMode && checkingDispo && <p className="text-[10px] text-blue-400 animate-pulse text-center">Vérification disponibilités...</p>}
+
+                        <div className="flex gap-3 pt-4 border-t border-white/10">
+                             {editMode ? (
+                                 <><button type="button" onClick={() => setShowModalEvent(false)} className="flex-1 text-gray-400">Annuler</button><button type="submit" className="flex-1 btn-neon-blue font-bold text-white">Sauvegarder</button></>
+                             ) : (
+                                 <>
+                                    {canDelete && <button type="button" onClick={handleDelete} className="text-red-400 border border-red-500/30 px-4 py-2 rounded-lg flex gap-2"><Trash2 className="w-4 h-4"/> Supprimer</button>}
+                                    {canEdit && <button type="button" onClick={() => setEditMode(true)} className="flex-1 btn-neon-blue font-bold text-white flex justify-center gap-2"><Edit3 className="w-4 h-4"/> Modifier</button>}
+                                    {!canEdit && !canDelete && <p className="text-xs text-gray-500 italic">Lecture seule</p>}
+                                 </>
+                             )}
+                        </div>
+                     </Container>
+                     <button onClick={() => setShowModalEvent(false)} className="absolute top-4 right-4 text-gray-400"><X/></button>
+                </div>
+            </div>
+        )}
       </div>
-
-      {/* --- MODALE DÉTAIL / EDIT (La même qu'avant) --- */}
-      {showModalEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowModalEvent(false)}>
-            <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative" onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => setShowModalEvent(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white transition"><X className="w-5 h-5" /></button>
-                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">{editMode ? <Edit3 className="w-5 h-5 text-blue-400" /> : <Calendar className="w-5 h-5 text-purple-400" />}{editMode ? "Modifier" : "Détails"}</h2>
-                {/* @ts-ignore */}
-                <Container onSubmit={editMode ? handleUpdate : undefined} className="space-y-5">
-                    <div><label className="text-xs uppercase font-bold text-gray-500 mb-1.5 block">Objet</label>{editMode ? (<input type="text" className="glass-input w-full" value={formData.objet} onChange={e => setFormData({...formData, objet: e.target.value})} />) : (<div className="text-white font-medium text-lg">{displayEvent.title}</div>)}</div>
-                    {!editMode && (<div className="bg-purple-500/10 p-3 rounded-lg border border-purple-500/20 flex items-center gap-3"><div className="p-2 bg-purple-500/20 rounded-full text-purple-400"><User className="w-4 h-4" /></div><div><p className="text-[10px] uppercase font-bold text-purple-300">Réservé par</p><p className="text-sm font-bold text-white">Moi ({displayEvent.auteur})</p></div></div>)}
-                    <div><label className="text-xs uppercase font-bold text-gray-500 mb-1.5 block">Lieu / Matériel</label>{editMode ? (<div className="space-y-2"><select className="glass-input w-full bg-[#0f172a]" value={formData.id_salle} onChange={e => setFormData({...formData, id_salle: e.target.value, id_ressource: ""})}><option value="">-- Aucune Salle --</option>{salles.map(s => <option key={s.id_salle} value={s.id_salle}>{s.nom_salle}</option>)}</select><select className="glass-input w-full bg-[#0f172a]" value={formData.id_ressource} onChange={e => setFormData({...formData, id_ressource: e.target.value, id_salle: ""})}><option value="">-- Aucun Matériel --</option>{ressources.map(r => <option key={r.id_ressource} value={r.id_ressource}>{r.nom_ressource}</option>)}</select><p className="text-[10px] text-gray-500">* Sélectionnez soit une salle, soit un matériel.</p></div>) : (<div className="flex items-center gap-2 text-sm text-gray-300 bg-white/5 p-3 rounded-lg border border-white/5">{displayEvent.nom_salle ? <MapPin className="w-4 h-4 text-blue-400" /> : <Box className="w-4 h-4 text-yellow-400" />}<span className="font-bold">{displayEvent.nom_salle || displayEvent.nom_ressource || "Aucun lieu défini"}</span><span className="text-gray-600">|</span><Briefcase className="w-4 h-4 text-purple-400" /><span>{displayEvent.nom_projet}</span></div>)}</div>
-                    <div className="grid grid-cols-2 gap-4"><div><label className="text-xs uppercase font-bold text-gray-500 mb-1.5 block">Début</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs" value={formData.start} onChange={e => setFormData({...formData, start: e.target.value})}/> : <div className="text-gray-300 text-sm flex items-center gap-2"><Clock className="w-3 h-3 text-gray-500" />{displayEvent.start ? new Date(displayEvent.start).toLocaleString() : "-"}</div>}</div><div><label className="text-xs uppercase font-bold text-gray-500 mb-1.5 block">Fin</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs" value={formData.end} onChange={e => setFormData({...formData, end: e.target.value})}/> : <div className="text-gray-300 text-sm flex items-center gap-2"><Clock className="w-3 h-3 text-gray-500" />{displayEvent.end ? new Date(displayEvent.end).toLocaleString() : "-"}</div>}</div></div>
-                    <div className="flex gap-3 pt-6 border-t border-white/10 mt-2">{editMode ? (<><button type="button" onClick={() => setEditMode(false)} className="flex-1 py-2.5 rounded-xl border border-white/10 text-gray-400 hover:text-white transition text-sm">Annuler</button><button type="submit" className="flex-1 btn-neon-blue py-2.5 rounded-xl font-bold text-white text-sm">Sauvegarder</button></>) : (<><button type="button" onClick={handleDelete} className="px-4 py-2.5 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition text-sm flex items-center gap-2"><Trash2 className="w-4 h-4" /> Supprimer</button><button type="button" onClick={() => setEditMode(true)} className="flex-1 btn-neon-blue py-2.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2"><Edit3 className="w-4 h-4" /> Modifier</button></>)}</div>
-                </Container>
-            </div>
-        </div>
-      )}
-
-      {/* --- MODALE LISTE PROJETS --- */}
-      {showModalProjets && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowModalProjets(false)}>
-            <div className="glass-panel w-full max-w-2xl p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => setShowModalProjets(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white transition"><X className="w-5 h-5" /></button>
-                <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><FolderOpen className="w-6 h-6 text-blue-400" /> Mes Projets</h2>
-                <div className="space-y-4">
-                    {mesProjets.length > 0 ? mesProjets.map(p => (
-                        <div key={p.id_projet} className="p-4 rounded-xl bg-white/5 border border-white/10 hover:border-blue-500/30 transition flex justify-between items-center">
-                            <div><h3 className="font-bold text-white text-lg">{p.nom_projet}</h3><p className="text-gray-400 text-sm mt-1">{p.description || "Pas de description"}</p></div>
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${p.statut === 'EN_COURS' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-700 text-gray-400'}`}>{p.statut}</span>
-                        </div>
-                    )) : <div className="text-center py-10 text-gray-500">Aucun projet.</div>}
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* --- MODALE LISTE RÉUNIONS --- */}
-      {showModalReunions && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowModalReunions(false)}>
-            <div className="glass-panel w-full max-w-2xl p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => setShowModalReunions(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white transition"><X className="w-5 h-5" /></button>
-                <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><CalendarRange className="w-6 h-6 text-purple-400" /> Toutes mes Réunions</h2>
-                <div className="space-y-4">
-                    {events.length > 0 ? events.sort((a,b) => new Date(a.start).getTime() - new Date(b.start).getTime()).map(e => (
-                        <div key={e.id} className="p-4 rounded-xl bg-white/5 border border-white/10 flex gap-4 items-center cursor-pointer hover:bg-white/10 transition" onClick={() => { setShowModalReunions(false); handleEventClick({ event: { ...e, extendedProps: e.extendedProps, start: new Date(e.start), end: new Date(e.end), id: e.id } }); }}>
-                            <div className="flex flex-col items-center justify-center bg-purple-500/20 p-3 rounded-lg w-16 text-purple-300">
-                                <span className="text-xs font-bold uppercase">{new Date(e.start).toLocaleString('fr-FR', { month: 'short' })}</span>
-                                <span className="text-xl font-bold">{new Date(e.start).getDate()}</span>
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-white">{e.extendedProps.objet}</h3>
-                                <p className="text-xs text-gray-400 flex items-center gap-2 mt-1"><Clock className="w-3 h-3"/> {new Date(e.start).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} - {new Date(e.end).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} | {e.extendedProps.nom_salle || e.extendedProps.nom_ressource || "Sans lieu"}</p>
-                            </div>
-                        </div>
-                    )) : <div className="text-center py-10 text-gray-500">Aucune réunion prévue.</div>}
-                </div>
-            </div>
-        </div>
-      )}
-
     </div>
   );
 }

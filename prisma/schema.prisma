@@ -10,14 +10,11 @@ datasource db {
 
 // --- LOGS IA (QUOTAS) ---
 model AiLog {
-  id         String   @id @default(cuid())
-  createdAt  DateTime @default(now())
-  
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
   id_employe String
   employe    Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
-  
-  prompt     String?  // Historique de la demande
-
+  prompt     String? 
   @@index([id_employe])
   @@map("ai_logs")
 }
@@ -46,8 +43,37 @@ model Employe {
   historique_actions  HistoriqueAction[]
   reservations        ReservationSalle[]
   historique_ia       AiLog[]
+  
+  // 👇 NOUVEAU : RELATIONS TÂCHES
+  tachesRecues        Tache[] @relation("TacheRecue")
+  tachesDonnees       Tache[] @relation("TacheDonnee")
 
   @@map("employes")
+}
+
+model Tache {
+  id_tache      String   @id @default(cuid())
+  titre         String
+  description   String?
+  // SUPPRIMER LA LIGNE SUIVANTE QUI ETAIT EN DOUBLE :
+  // statut        String   @default("A_FAIRE") 
+  
+  id_projet     String?
+  projet        Projet?  @relation(fields: [id_projet], references: [id_projet])
+  
+  id_assigne_a  String   
+  assigne_a     Employe  @relation("TacheRecue", fields: [id_assigne_a], references: [id_employe])
+  
+  id_assigne_par String  
+  assigne_par    Employe @relation("TacheDonnee", fields: [id_assigne_par], references: [id_employe])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // GARDER UNIQUEMENT CELLE-CI (Version Enum) :
+  statut        StatutTache @default(A_FAIRE)
+  
+  @@map("taches")
 }
 
 // --- AUTRES MODÈLES ---
@@ -73,16 +99,20 @@ model DemandeMdp {
 }
 
 model Projet {
-  id_projet      String    @id @default(cuid())
+  id_projet      String     @id @default(cuid())
   nom_projet     String
   description    String?
   date_debut     DateTime
   date_fin       DateTime?
   statut         StatutProjet @default(EN_COURS)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
   participations ParticipationProjet[]
   reservations   ReservationSalle[]
+  
+  // 👇 AJOUTE CETTE LIGNE :
+  taches         Tache[] 
+
   @@map("projets")
 }
 
@@ -172,6 +202,13 @@ enum Role {
   DEVELOPPEUR
   STAGIAIRE
   EMPLOYE
+}
+
+enum StatutTache {
+  A_FAIRE
+  PLANIFIE
+  TERMINE
+  EN_COURS
 }
 
 enum StatutProjet {
