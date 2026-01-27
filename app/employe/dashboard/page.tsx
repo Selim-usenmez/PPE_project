@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { 
   Settings, LogOut, Calendar, AlertTriangle, Briefcase, Clock, MapPin, Loader2, 
-  Plus, Trash2, Edit3, X, CalendarRange, FolderOpen, ShieldCheck, User, Box, 
-  CheckCircle2, BellRing, StickyNote 
+  Plus, Trash2, Edit3, X, FolderOpen, ShieldCheck, User, 
+  CheckCircle2, BellRing, StickyNote, Sun, XCircle
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -16,18 +16,35 @@ import interactionPlugin from "@fullcalendar/interaction";
 import frLocale from '@fullcalendar/core/locales/fr';
 import { can, canAssignTasks, canAccessAdminPanel } from "@/lib/permissions";
 
+// ✅ FONCTION DE FORMATAGE ROBUSTE
 const formatForInput = (d: any) => {
     if (!d) return "";
     try {
         const date = new Date(d);
+        // Ajustement fuseau horaire pour que l'input affiche la bonne heure locale
         const offset = date.getTimezoneOffset() * 60000;
-        return (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
+        const localISOTime = (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
+        return localISOTime;
     } catch (e) { return ""; }
 };
 
-// --- RENDER PERSONNALISÉ DES ÉVÉNEMENTS (Le côté "Sexy") ---
+// --- RENDER CUSTOM (Gestion Affichage Congé vs Réservation) ---
 function renderEventContent(eventInfo: any) {
-    const isMine = eventInfo.event.extendedProps.isMine;
+    const props = eventInfo.event.extendedProps;
+    
+    // CAS 1 : C'est un CONGÉ
+    if (props.type === 'CONGE') {
+        const isMe = props.isMine;
+        return (
+            <div className={`w-full h-full p-1 flex items-center gap-2 rounded-md border-l-4 ${isMe ? 'bg-green-500/20 border-green-500 text-green-400' : 'bg-orange-500/20 border-orange-500 text-orange-400'} overflow-hidden`}>
+                <Sun className="w-3 h-3 flex-shrink-0" />
+                <span className="text-[10px] font-bold truncate">{eventInfo.event.title}</span>
+            </div>
+        );
+    }
+
+    // CAS 2 : C'est une RÉSERVATION
+    const isMine = props.isMine;
     return (
       <div className={`w-full h-full p-1.5 flex flex-col justify-start rounded-md border-l-4 ${isMine ? 'border-blue-400 bg-blue-600/20' : 'border-gray-500 bg-gray-700/20'} overflow-hidden`}>
         <div className="flex items-center gap-1 text-[10px] font-bold opacity-80 uppercase tracking-wider mb-0.5">
@@ -35,9 +52,9 @@ function renderEventContent(eventInfo: any) {
             {eventInfo.timeText}
         </div>
         <div className="font-bold text-xs truncate leading-tight">{eventInfo.event.title}</div>
-        {eventInfo.event.extendedProps.nom_salle && (
+        {props.nom_salle && (
             <div className="text-[9px] mt-1 flex items-center gap-1 opacity-70 truncate">
-                <MapPin className="w-2.5 h-2.5" /> {eventInfo.event.extendedProps.nom_salle}
+                <MapPin className="w-2.5 h-2.5" /> {props.nom_salle}
             </div>
         )}
       </div>
@@ -56,17 +73,20 @@ export default function EmployeDashboard() {
   const [dispoRessources, setDispoRessources] = useState<any[]>([]);
   const [checkingDispo, setCheckingDispo] = useState(false);
 
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<any[]>([]); 
   const [mesProjets, setMesProjets] = useState<any[]>([]);
   const [mesTaches, setMesTaches] = useState<any[]>([]);
   const [mesNotes, setMesNotes] = useState<any[]>([]);
+  const [mesConges, setMesConges] = useState<any[]>([]);
   const [employesList, setEmployesList] = useState<any[]>([]); 
 
   const [stats, setStats] = useState({ projets: 0, reservations: 0, taches: 0 });
 
+  // Modales
   const [showModalEvent, setShowModalEvent] = useState(false);
   const [showModalProjets, setShowModalProjets] = useState(false);
   const [showModalAssignTask, setShowModalAssignTask] = useState(false);
+  const [showModalConges, setShowModalConges] = useState(false);
 
   const [editMode, setEditMode] = useState(false);
   const [displayEvent, setDisplayEvent] = useState<any>({});
@@ -74,6 +94,7 @@ export default function EmployeDashboard() {
   const [taskForm, setTaskForm] = useState({ titre: "", id_assigne_a: "", id_projet: "" });
   const [noteInput, setNoteInput] = useState("");
   const [noteToPlanId, setNoteToPlanId] = useState<string | null>(null);
+  const [congeForm, setCongeForm] = useState({ type: "VACANCES", date_debut: "", date_fin: "", commentaire: "" });
 
   const [projetCible, setProjetCible] = useState<any>(null);
   const [equipeProjet, setEquipeProjet] = useState<any[]>([]);
@@ -118,19 +139,20 @@ export default function EmployeDashboard() {
   const loadData = async (userId: string, role: string) => {
     setLoading(true);
     const promises = [
-        fetchReservations(userId),
+        fetchReservations(userId, role),
         fetch(`/api/employes/${userId}/projets`).then(r => r.json()),
         fetch("/api/salles").then(r => r.json()),
         fetch("/api/ressources?etat=DISPONIBLE").then(r => r.json()),
         fetch(`/api/taches?userId=${userId}`).then(r => r.json()),
-        fetch(`/api/notes?userId=${userId}`).then(r => r.json())
+        fetch(`/api/notes?userId=${userId}`).then(r => r.json()),
+        fetch(`/api/conges?userId=${userId}`).then(r => r.json()) 
     ];
 
     if (canAssignTasks(role)) {
         promises.push(fetch("/api/employes").then(r => r.json()));
     }
 
-    const [resas, projets, sallesData, ressourcesData, tachesData, notesData, allEmployes] = await Promise.all(promises);
+    const [resas, projets, sallesData, ressourcesData, tachesData, notesData, congesData, allEmployes] = await Promise.all(promises);
 
     setAllSalles(sallesData);
     setAllRessources(ressourcesData);
@@ -140,6 +162,7 @@ export default function EmployeDashboard() {
     setMesProjets(Array.isArray(projets) ? projets : []);
     setMesTaches(Array.isArray(tachesData) ? tachesData : []);
     setMesNotes(Array.isArray(notesData) ? notesData : []);
+    setMesConges(Array.isArray(congesData) ? congesData : []);
     if (allEmployes) setEmployesList(allEmployes);
 
     setStats({
@@ -151,50 +174,88 @@ export default function EmployeDashboard() {
     setLoading(false);
   };
 
-  const fetchReservations = async (userId: string) => {
-      const res = await fetch(`/api/reservations?userId=${userId}&refresh=${Date.now()}`);
-      if(res.ok) {
-          const data = await res.json();
-          const evts = data.map((evt: any) => ({
+  const fetchReservations = async (userId: string, role: string) => {
+      let finalEvents: any[] = [];
+
+      // 1. RÉSERVATIONS
+      const resResa = await fetch(`/api/reservations?userId=${userId}&refresh=${Date.now()}`);
+      if(resResa.ok) {
+          const dataResa = await resResa.json();
+          const resaEvents = dataResa.map((evt: any) => ({
              id: evt.id_reservation,
-             title: evt.objet, // On simplifie car le renderEventContent gère l'affichage
+             title: evt.objet,
              start: evt.date_debut, end: evt.date_fin,
-             // On met transparent car on utilise un render custom, mais on garde la bordure pour le drag
-             backgroundColor: 'transparent', 
-             borderColor: 'transparent',
+             backgroundColor: 'transparent', borderColor: 'transparent',
              editable: evt.id_employe === userId,
              extendedProps: { 
                  ...evt, 
                  isMine: evt.id_employe === userId,
-                 nom_salle: evt.salle?.nom_salle || (evt.ressource ? evt.ressource.nom_ressource : null)
+                 nom_salle: evt.salle?.nom_salle || (evt.ressource ? evt.ressource.nom_ressource : null),
+                 type: 'RESERVATION'
              }
           }));
-          setEvents(evts);
-          return evts;
+          finalEvents = [...finalEvents, ...resaEvents];
       }
-      return [];
+
+      // 2. CONGÉS
+      const param = role === 'CHEF_DE_PROJET' ? `managerId=${userId}` : `userId=${userId}`;
+      const resConges = await fetch(`/api/conges?${param}`);
+      if(resConges.ok) {
+          const dataConges = await resConges.json();
+          const congesEvents = dataConges.map((c: any) => {
+              const isMe = c.id_employe === userId;
+              return {
+                  id: c.id_conge,
+                  title: isMe ? `🌴 Mon Congé` : `⛔ ${c.employe.prenom} ${c.employe.nom[0]}.`,
+                  start: c.date_debut,
+                  end: c.date_fin,
+                  allDay: true,
+                  backgroundColor: 'transparent', borderColor: 'transparent',
+                  editable: false,
+                  extendedProps: { 
+                      isMine: isMe,
+                      type: 'CONGE'
+                  }
+              };
+          });
+          finalEvents = [...finalEvents, ...congesEvents];
+      }
+
+      setEvents(finalEvents);
+      return finalEvents;
   };
 
-  // --- HANDLERS (Identiques à avant) ---
+  // --- ACTIONS ---
+  const handleRequestConge = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try {
+          const res = await fetch("/api/conges", {
+              method: "POST", headers: {"Content-Type":"application/json"},
+              body: JSON.stringify({ ...congeForm, id_employe: user.id_employe })
+          });
+          if(res.ok) {
+              toast.success("Demande envoyée !");
+              setCongeForm({ type: "VACANCES", date_debut: "", date_fin: "", commentaire: "" });
+              setShowModalConges(false);
+              loadData(user.id_employe, user.role); 
+          } else { toast.error("Erreur envoi"); }
+      } catch(e) { toast.error("Erreur serveur"); }
+  };
+
   const handleAddNote = async (e: React.FormEvent) => {
       e.preventDefault();
       if(!noteInput.trim()) return;
       try {
-          const res = await fetch("/api/notes", {
-              method: "POST", headers: {"Content-Type":"application/json"},
-              body: JSON.stringify({ contenu: noteInput, id_employe: user.id_employe })
-          });
-          if(res.ok) {
-              setNoteInput("");
-              const newNotes = await fetch(`/api/notes?userId=${user.id_employe}`).then(r => r.json());
-              setMesNotes(newNotes);
-              toast.success("Note ajoutée");
-          }
+          await fetch("/api/notes", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ contenu: noteInput, id_employe: user.id_employe }) });
+          setNoteInput("");
+          const newNotes = await fetch(`/api/notes?userId=${user.id_employe}`).then(r => r.json());
+          setMesNotes(newNotes);
+          toast.success("Note ajoutée");
       } catch(e) { toast.error("Erreur"); }
   };
 
   const handleDeleteNote = async (id_note: string) => {
-      await fetch(`/api/notes?id=${id_note}`, { method: "DELETE" });
+      await fetch(`/api/notes?id=${id_note}`,    { method: "DELETE" });
       setMesNotes(mesNotes.filter(n => n.id_note !== id_note));
   };
 
@@ -245,15 +306,27 @@ export default function EmployeDashboard() {
               body: JSON.stringify({ ...taskForm, id_projet: projetCible.id_projet, id_assigne_par: user.id_employe }) 
           });
           if(res.ok) { toast.success("Tâche envoyée !"); setShowModalAssignTask(false); }
-          else { toast.error("Erreur"); }
+          else { 
+              const err = await res.json();
+              toast.error(err.error || "Erreur"); 
+          }
       } catch(err) { toast.error("Erreur"); }
   };
   
   const handleEventClick = (info: any) => {
       const event = info.event;
       const props = event.extendedProps;
+      if (props.type === 'CONGE') return;
+
       setDisplayEvent({ ...props, start: event.start, end: event.end, isMine: props.isMine });
-      setFormData({ id: event.id, objet: props.objet, start: formatForInput(event.start), end: formatForInput(event.end), id_salle: props.id_salle || "", id_ressource: props.id_ressource || "" });
+      setFormData({ 
+          id: event.id, 
+          objet: props.objet, 
+          start: formatForInput(event.start), 
+          end: formatForInput(event.end), 
+          id_salle: props.id_salle || "", 
+          id_ressource: props.id_ressource || "" 
+      });
       setEditMode(false);
       setShowModalEvent(true);
   };
@@ -270,7 +343,10 @@ export default function EmployeDashboard() {
               if (noteToPlanId) { await handleDeleteNote(noteToPlanId); setNoteToPlanId(null); }
               loadData(user.id_employe, user.role); 
               setShowModalEvent(false); 
-          } else { toast.error("Conflit ou erreur !"); }
+          } else { 
+              const err = await res.json();
+              toast.error(err.error || "Erreur"); 
+          }
       } catch (err) { toast.error("Erreur"); }
   };
 
@@ -282,7 +358,7 @@ export default function EmployeDashboard() {
   };
 
   const handleEventDropOrResize = async (info: any) => {
-      if (!info.event.extendedProps.isMine) { info.revert(); return; }
+      if (!info.event.extendedProps.isMine || info.event.extendedProps.type === 'CONGE') { info.revert(); return; }
       const payload = { id_reservation: info.event.id, date_debut: info.event.start.toISOString(), date_fin: info.event.end.toISOString() };
       await fetch("/api/reservations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   };
@@ -299,94 +375,26 @@ export default function EmployeDashboard() {
   return (
     <div className="min-h-screen bg-[#030712] text-gray-200 p-6 md:p-8 flex flex-col">
       
-      {/* 🌟 CSS MAGIQUE POUR FULLCALENDAR */}
+      {/* 🌟 CSS */}
       <style jsx global>{`
-        /* Personnalisation Globale */
-        .fc { 
-            font-family: 'Inter', sans-serif; 
-            border: none !important; 
-        }
-        
-        /* HEADER TOOLBAR */
-        .fc-toolbar-title { 
-            font-size: 1.8rem !important; 
-            font-weight: 800; 
-            background: linear-gradient(to right, #60a5fa, #a78bfa); 
-            -webkit-background-clip: text; 
-            color: transparent; 
-            text-transform: capitalize;
-        }
-        
-        /* Boutons Navigation */
-        .fc-button-primary { 
-            background-color: rgba(255, 255, 255, 0.05) !important; 
-            border: 1px solid rgba(255, 255, 255, 0.1) !important; 
-            color: white !important; 
-            font-weight: 600; 
-            border-radius: 9999px !important; 
-            padding: 8px 16px !important; 
-            transition: all 0.2s;
-        }
-        .fc-button-primary:hover { 
-            background-color: rgba(59, 130, 246, 0.2) !important; 
-            border-color: #3b82f6 !important; 
-        }
-        .fc-button-active { 
-            background-color: #2563EB !important; 
-            border-color: #2563EB !important; 
-            box-shadow: 0 0 15px rgba(37,99,235,0.4);
-        }
-
-        /* GRILLE ET CELLULES */
-        .fc-theme-standard td, .fc-theme-standard th { 
-            border-color: rgba(255,255,255,0.03) !important; 
-        }
-        .fc-timegrid-slot { 
-            height: 40px !important; /* Lignes plus hautes */
-        }
-        .fc-timegrid-slot-label { 
-            font-size: 0.75rem; 
-            color: #6b7280; 
-            font-weight: 500;
-        }
-        
-        /* INDICATEUR TEMPS ACTUEL */
-        .fc-timegrid-now-indicator-line { 
-            border-color: #ef4444; 
-            border-width: 2px; 
-            box-shadow: 0 0 10px #ef4444; /* Effet Laser Néon */
-        }
-        .fc-timegrid-now-indicator-arrow { 
-            border-color: #ef4444; 
-            border-width: 6px; 
-        }
-
-        /* JOUR ACTUEL */
-        .fc-day-today { 
-            background-color: rgba(59, 130, 246, 0.03) !important; 
-        }
-
-        /* ENTÊTES DE COLONNES */
-        .fc-col-header-cell-cushion { 
-            color: #e5e7eb; 
-            padding: 15px 0 !important; 
-            font-weight: 700; 
-            text-transform: uppercase; 
-            font-size: 0.85rem; 
-            letter-spacing: 0.05em; 
-        }
-
-        /* ÉVÉNEMENTS */
-        .fc-event { 
-            background: transparent !important; 
-            border: none !important; 
-            box-shadow: none !important;
-        }
+        .fc { font-family: 'Inter', sans-serif; border: none !important; }
+        .fc-toolbar-title { font-size: 1.8rem !important; font-weight: 800; background: linear-gradient(to right, #60a5fa, #a78bfa); -webkit-background-clip: text; color: transparent; text-transform: capitalize; }
+        .fc-button-primary { background-color: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; color: white !important; font-weight: 600; border-radius: 9999px !important; padding: 8px 16px !important; transition: all 0.2s; }
+        .fc-button-primary:hover { background-color: rgba(59, 130, 246, 0.2) !important; border-color: #3b82f6 !important; }
+        .fc-button-active { background-color: #2563EB !important; border-color: #2563EB !important; box-shadow: 0 0 15px rgba(37,99,235,0.4); }
+        .fc-theme-standard td, .fc-theme-standard th { border-color: rgba(255,255,255,0.03) !important; }
+        .fc-timegrid-slot { height: 40px !important; }
+        .fc-timegrid-slot-label { font-size: 0.75rem; color: #6b7280; font-weight: 500; }
+        .fc-timegrid-now-indicator-line { border-color: #ef4444; border-width: 2px; box-shadow: 0 0 10px #ef4444; }
+        .fc-timegrid-now-indicator-arrow { border-color: #ef4444; border-width: 6px; }
+        .fc-day-today { background-color: rgba(59, 130, 246, 0.03) !important; }
+        .fc-col-header-cell-cushion { color: #e5e7eb; padding: 15px 0 !important; font-weight: 700; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em; }
+        .fc-event { background: transparent !important; border: none !important; box-shadow: none !important; }
       `}</style>
 
       <div className="max-w-[1920px] mx-auto w-full space-y-6 animate-fade-in flex-1 flex flex-col">
         
-        {/* HEADER COMPACT */}
+        {/* HEADER */}
         <header className="flex justify-between items-center glass-panel px-6 py-4 rounded-2xl border border-white/5">
              <div className="flex items-center gap-4">
                 <div className="relative h-10 w-10"><Image src="/logo.png" alt="Logo" width={40} height={40} className="object-contain"/></div>
@@ -397,18 +405,17 @@ export default function EmployeDashboard() {
              </div>
              <div className="flex gap-2">
                 {canAccessAdminPanel(user.role) && <button onClick={() => router.push('/admin/dashboard')} className="px-4 py-2 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 font-bold flex items-center gap-2 hover:bg-purple-600/20 transition"><ShieldCheck className="w-4 h-4"/> Admin</button>}
+                {user.role === 'RH' && <button onClick={() => router.push('/rh/dashboard')} className="px-4 py-2 rounded-xl bg-pink-600/10 border border-pink-500/30 text-pink-400 font-bold flex items-center gap-2 hover:bg-pink-600/20 transition"><User className="w-4 h-4"/> Espace RH</button>}
                 <button onClick={() => router.push('/employe/profile')} className="p-2 rounded-xl border border-white/10 hover:bg-white/5 text-gray-300 transition"><Settings className="w-5 h-5"/></button>
                 <button onClick={handleLogout} className="p-2 rounded-xl border border-red-500/20 hover:bg-red-500/10 text-red-400 transition"><LogOut className="w-5 h-5"/></button>
              </div>
         </header>
 
-        {/* LAYOUT PRINCIPAL : SIDEBAR + CALENDRIER */}
+        {/* LAYOUT */}
         <div className="flex flex-col lg:flex-row gap-6 h-full flex-1">
             
-            {/* SIDEBAR (WIDGETS) */}
+            {/* SIDEBAR */}
             <div className="lg:w-[320px] space-y-4 flex flex-col h-full">
-                
-                {/* STATS RAPIDES */}
                 <div className="grid grid-cols-2 gap-3">
                     <div className="glass-panel p-4 rounded-xl border-l-2 border-blue-500 bg-gradient-to-br from-blue-500/5 to-transparent">
                         <p className="text-[10px] text-blue-400 font-bold uppercase mb-1">Projets</p>
@@ -420,13 +427,14 @@ export default function EmployeDashboard() {
                     </div>
                 </div>
 
-                {/* BOUTONS ACTIONS */}
-                <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => router.push('/employe/reservations')} className="p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-blue-900/20"><Plus className="w-4 h-4"/> Réserver</button>
-                    <button onClick={() => router.push('/employe/incidents')} className="p-3 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition border border-white/5"><AlertTriangle className="w-4 h-4"/> Signaler</button>
+                {/* BOUTONS D'ACTION */}
+                <div className="grid grid-cols-3 gap-2">
+                    <button onClick={() => router.push('/employe/reservations')} className="p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl flex items-center justify-center transition shadow-lg shadow-blue-900/20"><Plus className="w-5 h-5"/></button>
+                    <button onClick={() => setShowModalConges(true)} className="p-3 bg-pink-600 hover:bg-pink-500 text-white rounded-xl flex items-center justify-center transition shadow-lg shadow-pink-900/20" title="Poser des congés"><Sun className="w-5 h-5"/></button>
+                    <button onClick={() => router.push('/employe/incidents')} className="p-3 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl flex items-center justify-center transition border border-white/5"><AlertTriangle className="w-5 h-5"/></button>
                 </div>
 
-                {/* NOTES PERSO */}
+                {/* NOTES */}
                 <div className="glass-panel p-5 rounded-2xl border border-white/10 flex-1 min-h-[200px] flex flex-col">
                     <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2"><StickyNote className="w-4 h-4 text-yellow-400"/> Notes Rapides</h3>
                     <form onSubmit={handleAddNote} className="flex gap-2 mb-3">
@@ -447,17 +455,14 @@ export default function EmployeDashboard() {
                     </div>
                 </div>
 
-                {/* TÂCHES PM */}
+                {/* TÂCHES */}
                 <div className="glass-panel p-5 rounded-2xl border border-white/10 flex-1 min-h-[200px] flex flex-col">
                     <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2"><BellRing className="w-4 h-4 text-orange-400"/> Tâches Assignées</h3>
                     <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
                         {mesTaches.filter(t => t.statut === 'A_FAIRE').length === 0 && <p className="text-gray-600 text-xs italic text-center mt-4">Tout est à jour !</p>}
                         {mesTaches.filter(t => t.statut === 'A_FAIRE').map(t => (
                             <div key={t.id_tache} className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-orange-500/30 transition">
-                                <div className="flex justify-between">
-                                    <p className="text-white font-bold text-xs">{t.titre}</p>
-                                    {t.projet && <span className="text-[9px] bg-blue-500/10 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/20">{t.projet.nom_projet}</span>}
-                                </div>
+                                <div className="flex justify-between"><p className="text-white font-bold text-xs">{t.titre}</p>{t.projet && <span className="text-[9px] bg-blue-500/10 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/20">{t.projet.nom_projet}</span>}</div>
                                 <p className="text-[10px] text-gray-500 mt-1">De : {t.assigne_par.prenom}</p>
                                 <div className="flex gap-2 mt-2">
                                     <button onClick={() => handlePlanTask(t)} className="flex-1 text-[10px] bg-blue-600/10 text-blue-400 py-1 rounded hover:bg-blue-600/20 border border-blue-500/20">Planifier</button>
@@ -468,39 +473,139 @@ export default function EmployeDashboard() {
                     </div>
                 </div>
 
-                {/* BOUTON PROJETS */}
                 <button onClick={() => setShowModalProjets(true)} className="glass-panel p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition group w-full text-left">
                     <span className="text-sm font-bold text-gray-300 group-hover:text-white">Voir mes Projets</span>
                     <FolderOpen className="w-5 h-5 text-gray-500 group-hover:text-blue-400 transition"/>
                 </button>
-
             </div>
 
-            {/* ZONE CALENDRIER (IMMENSE & SEXY) */}
+            {/* CALENDRIER */}
             <div className="flex-1 glass-panel p-1 rounded-2xl shadow-2xl border border-white/10 overflow-hidden relative">
                  <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a] via-[#0f172a] to-blue-900/10 pointer-events-none"></div>
                  <div className="relative h-full">
                     <FullCalendar 
-                        plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]} 
-                        initialView="timeGridWeek" 
-                        locale={frLocale} 
-                        events={events} 
-                        eventClick={handleEventClick} 
-                        eventDrop={handleEventDropOrResize} 
-                        eventResize={handleEventDropOrResize} 
-                        height="85vh" // 🔥 HAUTEUR BOOSTÉE
-                        slotMinTime="07:00:00"
-                        slotMaxTime="22:00:00"
-                        allDaySlot={false}
+                        plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]} initialView="timeGridWeek" locale={frLocale} 
+                        events={events} eventClick={handleEventClick} eventDrop={handleEventDropOrResize} eventResize={handleEventDropOrResize} 
+                        height="85vh" slotMinTime="07:00:00" slotMaxTime="22:00:00" allDaySlot={false}
                         headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' }}
-                        eventContent={renderEventContent} // 🔥 RENDU CUSTOM
-                        nowIndicator={true}
+                        eventContent={renderEventContent} nowIndicator={true}
                     />
                  </div>
             </div>
         </div>
 
-        {/* --- MODALES (Code inchangé mais essentiel) --- */}
+        {/* --- MODALE CONGÉS --- */}
+        {showModalConges && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                <div className="glass-panel w-full max-w-lg p-8 rounded-2xl border border-pink-500/30 bg-[#0f172a] relative shadow-2xl">
+                    <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><Sun className="w-6 h-6 text-pink-500"/> Gestion des Congés</h2>
+                    
+                    <div className="grid grid-cols-2 gap-6 mb-6">
+                        <div className="p-4 bg-white/5 rounded-xl border border-white/5">
+                            <p className="text-xs text-gray-400 uppercase font-bold">En attente</p>
+                            <p className="text-2xl font-bold text-white">{mesConges.filter((c:any) => c.statut === 'EN_ATTENTE').length}</p>
+                        </div>
+                        <div className="p-4 bg-white/5 rounded-xl border border-white/5">
+                            <p className="text-xs text-gray-400 uppercase font-bold">Validés</p>
+                            <p className="text-2xl font-bold text-green-400">{mesConges.filter((c:any) => c.statut === 'VALIDE').length}</p>
+                        </div>
+                    </div>
+
+                    <form onSubmit={handleRequestConge} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="text-xs font-bold text-gray-500">Du</label><input type="date" required className="glass-input w-full [color-scheme:dark]" value={congeForm.date_debut} onChange={e => setCongeForm({...congeForm, date_debut: e.target.value})} /></div>
+                            <div><label className="text-xs font-bold text-gray-500">Au</label><input type="date" required className="glass-input w-full [color-scheme:dark]" value={congeForm.date_fin} onChange={e => setCongeForm({...congeForm, date_fin: e.target.value})} /></div>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500">Type</label>
+                            <select className="glass-input w-full bg-[#0f172a]" value={congeForm.type} onChange={e => setCongeForm({...congeForm, type: e.target.value})}>
+                                <option value="VACANCES">Vacances</option>
+                                <option value="MALADIE">Arrêt Maladie</option>
+                                <option value="RTT">RTT</option>
+                                <option value="SANS_SOLDE">Sans Solde</option>
+                            </select>
+                        </div>
+                        <button type="submit" className="w-full btn-neon-pink py-3 rounded-xl font-bold text-white mt-2">Envoyer la demande</button>
+                    </form>
+
+                    <div className="mt-6 border-t border-white/10 pt-4">
+                        <p className="text-xs font-bold text-gray-500 mb-3 uppercase">Historique récent</p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
+                            {mesConges.map((c:any) => (
+                                <div key={c.id_conge} className="flex justify-between items-center text-xs p-2 rounded bg-white/5">
+                                    <span className="text-gray-300">{c.type} ({new Date(c.date_debut).toLocaleDateString()})</span>
+                                    <span className={`font-bold ${c.statut === 'VALIDE' ? 'text-green-400' : c.statut === 'REFUSE' ? 'text-red-400' : 'text-yellow-400'}`}>{c.statut}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <button onClick={() => setShowModalConges(false)} className="absolute top-4 right-4 text-gray-400"><X/></button>
+                </div>
+            </div>
+        )}
+
+        {/* MODALE EVENT AVEC CORRECTION DATE */}
+        {showModalEvent && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative">
+                     {/* @ts-ignore */}
+                     <Container onSubmit={editMode ? handleUpdate : undefined} className="space-y-5">
+                        <div><label className="text-gray-500 text-xs font-bold uppercase">Objet</label>{editMode ? <input className="glass-input w-full" value={formData.objet} onChange={e => setFormData({...formData, objet: e.target.value})} /> : <p className="text-white font-bold">{displayEvent.title}</p>}</div>
+                        
+                        {/* ✅ INPUTS DE DATE CORRIGÉS AVEC [color-scheme:dark] */}
+                        <div className="grid grid-cols-2 gap-4">
+                             <div>
+                                 <label className="text-gray-500 text-xs font-bold">Début</label>
+                                 {editMode ? 
+                                    <input 
+                                        type="datetime-local" 
+                                        className="glass-input w-full text-xs [color-scheme:white]" // 🔥 FIX ICI
+                                        value={formData.start} 
+                                        onChange={e => setFormData({...formData, start: e.target.value})}
+                                    /> 
+                                    : <p className="text-gray-300 text-sm">{new Date(displayEvent.start).toLocaleString()}</p>
+                                 }
+                             </div>
+                             <div>
+                                 <label className="text-gray-500 text-xs font-bold">Fin</label>
+                                 {editMode ? 
+                                    <input 
+                                        type="datetime-local" 
+                                        className="glass-input w-full text-xs [color-scheme:dark]" // 🔥 FIX ICI
+                                        value={formData.end} 
+                                        onChange={e => setFormData({...formData, end: e.target.value})}
+                                    /> 
+                                    : <p className="text-gray-300 text-sm">{new Date(displayEvent.end).toLocaleString()}</p>
+                                 }
+                             </div>
+                        </div>
+
+                        {editMode && (
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Salle</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_salle} onChange={e => setFormData({...formData, id_salle: e.target.value, id_ressource: ""})}><option value="">Aucune</option>{allSalles.map(s => { const isDispo = dispoSalles.some((ds: any) => ds.id_salle === s.id_salle) || s.id_salle === formData.id_salle; return <option key={s.id_salle} value={s.id_salle} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{s.nom_salle} {!isDispo ? "(Occupé)" : ""}</option>})}</select></div>
+                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Matériel</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_ressource} onChange={e => setFormData({...formData, id_ressource: e.target.value, id_salle: ""})}><option value="">Aucun</option>{allRessources.map(r => { const isDispo = dispoRessources.some((dr: any) => dr.id_ressource === r.id_ressource) || r.id_ressource === formData.id_ressource; return <option key={r.id_ressource} value={r.id_ressource} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{r.nom_ressource} {!isDispo ? "(Pris)" : ""}</option>})}</select></div>
+                            </div>
+                        )}
+                        {editMode && checkingDispo && <p className="text-[10px] text-blue-400 animate-pulse text-center">Vérification disponibilités...</p>}
+
+                        <div className="flex gap-3 pt-4 border-t border-white/10">
+                             {editMode ? (
+                                 <><button type="button" onClick={() => setShowModalEvent(false)} className="flex-1 text-gray-400">Annuler</button><button type="submit" className="flex-1 btn-neon-blue font-bold text-white">Sauvegarder</button></>
+                             ) : (
+                                 <>
+                                    {canDelete && <button type="button" onClick={handleDelete} className="text-red-400 border border-red-500/30 px-4 py-2 rounded-lg flex gap-2"><Trash2 className="w-4 h-4"/> Supprimer</button>}
+                                    {canEdit && <button type="button" onClick={() => setEditMode(true)} className="flex-1 btn-neon-blue font-bold text-white flex justify-center gap-2"><Edit3 className="w-4 h-4"/> Modifier</button>}
+                                    {!canEdit && !canDelete && <p className="text-xs text-gray-500 italic">Lecture seule</p>}
+                                 </>
+                             )}
+                        </div>
+                     </Container>
+                     <button onClick={() => setShowModalEvent(false)} className="absolute top-4 right-4 text-gray-400"><X/></button>
+                </div>
+            </div>
+        )}
+
+        {/* AUTRES MODALES RESTENT INCHANGÉES */}
         {showModalProjets && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowModalProjets(false)}>
                 <div className="glass-panel w-full max-w-2xl p-8 rounded-2xl border border-white/10 bg-[#0f172a] relative" onClick={e => e.stopPropagation()}>
@@ -536,43 +641,6 @@ export default function EmployeDashboard() {
                         <button type="submit" className="w-full btn-neon-blue py-3 rounded-xl font-bold text-white">Envoyer</button>
                     </form>
                     <button onClick={() => setShowModalAssignTask(false)} className="absolute top-4 right-4 text-gray-400"><X/></button>
-                </div>
-            </div>
-        )}
-        
-        {showModalEvent && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative">
-                     {/* @ts-ignore */}
-                     <Container onSubmit={editMode ? handleUpdate : undefined} className="space-y-5">
-                        <div><label className="text-gray-500 text-xs font-bold uppercase">Objet</label>{editMode ? <input className="glass-input w-full" value={formData.objet} onChange={e => setFormData({...formData, objet: e.target.value})} /> : <p className="text-white font-bold">{displayEvent.title}</p>}</div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                             <div><label className="text-gray-500 text-xs font-bold">Début</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs" value={formData.start} onChange={e => setFormData({...formData, start: e.target.value})}/> : <p className="text-gray-300 text-sm">{new Date(displayEvent.start).toLocaleString()}</p>}</div>
-                             <div><label className="text-gray-500 text-xs font-bold">Fin</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs" value={formData.end} onChange={e => setFormData({...formData, end: e.target.value})}/> : <p className="text-gray-300 text-sm">{new Date(displayEvent.end).toLocaleString()}</p>}</div>
-                        </div>
-
-                        {editMode && (
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Salle</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_salle} onChange={e => setFormData({...formData, id_salle: e.target.value, id_ressource: ""})}><option value="">Aucune</option>{allSalles.map(s => { const isDispo = dispoSalles.some((ds: any) => ds.id_salle === s.id_salle) || s.id_salle === formData.id_salle; return <option key={s.id_salle} value={s.id_salle} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{s.nom_salle} {!isDispo ? "(Occupé)" : ""}</option>})}</select></div>
-                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Matériel</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_ressource} onChange={e => setFormData({...formData, id_ressource: e.target.value, id_salle: ""})}><option value="">Aucun</option>{allRessources.map(r => { const isDispo = dispoRessources.some((dr: any) => dr.id_ressource === r.id_ressource) || r.id_ressource === formData.id_ressource; return <option key={r.id_ressource} value={r.id_ressource} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{r.nom_ressource} {!isDispo ? "(Pris)" : ""}</option>})}</select></div>
-                            </div>
-                        )}
-                        {editMode && checkingDispo && <p className="text-[10px] text-blue-400 animate-pulse text-center">Vérification disponibilités...</p>}
-
-                        <div className="flex gap-3 pt-4 border-t border-white/10">
-                             {editMode ? (
-                                 <><button type="button" onClick={() => setShowModalEvent(false)} className="flex-1 text-gray-400">Annuler</button><button type="submit" className="flex-1 btn-neon-blue font-bold text-white">Sauvegarder</button></>
-                             ) : (
-                                 <>
-                                    {canDelete && <button type="button" onClick={handleDelete} className="text-red-400 border border-red-500/30 px-4 py-2 rounded-lg flex gap-2"><Trash2 className="w-4 h-4"/> Supprimer</button>}
-                                    {canEdit && <button type="button" onClick={() => setEditMode(true)} className="flex-1 btn-neon-blue font-bold text-white flex justify-center gap-2"><Edit3 className="w-4 h-4"/> Modifier</button>}
-                                    {!canEdit && !canDelete && <p className="text-xs text-gray-500 italic">Lecture seule</p>}
-                                 </>
-                             )}
-                        </div>
-                     </Container>
-                     <button onClick={() => setShowModalEvent(false)} className="absolute top-4 right-4 text-gray-400"><X/></button>
                 </div>
             </div>
         )}

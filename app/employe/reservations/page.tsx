@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { CalendarRange, ArrowLeft, MapPin, Briefcase, FileText, Clock, Save, Loader2, Lightbulb, Box, Search, Sparkles, CheckCircle2, CalendarCheck, Lock } from "lucide-react";
 
+// Fonction de formatage pour l'input datetime-local (Gère le fuseau horaire local)
 const formatForInput = (d: string | Date) => {
     try {
         const date = new Date(d);
@@ -54,8 +55,11 @@ export default function EmployeReservationsPage() {
             fetch(`/api/employes/${currentUser.id_employe}/projets`).then(r => r.json()),
         ]);
         setSalles(resSalles); setRessources(resRessources); setMesProjets(Array.isArray(resProjets) ? resProjets : []);
+        
+        // Initialiser dates (Maintenant -> +1h)
         const now = new Date(); now.setMinutes(0,0,0); const end = new Date(now); end.setHours(end.getHours() + 1);
         setForm(f => ({ ...f, date_debut: formatForInput(now), date_fin: formatForInput(end) }));
+        
         if (Array.isArray(resProjets) && resProjets.length > 0) setForm(f => ({ ...f, id_projet: resProjets[0].id_projet }));
       } catch (e) { toast.error("Erreur chargement"); } 
       finally { setLoading(false); }
@@ -73,6 +77,7 @@ export default function EmployeReservationsPage() {
     return () => clearInterval(interval);
   }, [quotaResetTime, user]);
 
+  // Vérification Dispo en Temps Réel
   useEffect(() => {
     const checkAvailability = async () => {
         if (!form.date_debut || !form.date_fin) return;
@@ -86,11 +91,12 @@ export default function EmployeReservationsPage() {
     return () => clearTimeout(timer);
   }, [form.date_debut, form.date_fin]);
 
+  // Appel IA
   const handleAnalyzeAI = async () => {
     if (!form.objet || form.objet.length < 5) return toast.warning("Décrivez d'abord votre besoin.");
     setAnalyzing(true);
     try {
-        const res = await fetch("/api/reservations/recommend", {
+        const res = await fetch("/api/reservations/recommend", { // Note : Vérifie que l'URL est bien /api/reservations/recommend OU /api/recommend selon ton fichier route.ts
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ start: form.date_debut, end: form.date_fin, objet: form.objet, userId: user.id_employe })
         });
@@ -104,11 +110,8 @@ export default function EmployeReservationsPage() {
     } catch (e) { toast.error("Erreur connexion"); } finally { setAnalyzing(false); }
   };
 
-  // ... (garde tes imports et le début du code identique)
-
-// Remplace juste la fonction applySuggestion par celle-ci :
-
-const applySuggestion = () => {
+  // Appliquer Suggestion IA
+  const applySuggestion = () => {
     if (!advice) return;
     setForm(prev => ({
         ...prev,
@@ -117,13 +120,10 @@ const applySuggestion = () => {
         date_fin: advice.newDates ? formatForInput(advice.newDates.end) : prev.date_fin,
         id_salle: advice.room ? advice.room.id_salle : prev.id_salle,
         id_ressource: advice.suggestedEquipment ? advice.suggestedEquipment.id_ressource : prev.id_ressource,
-        // 👇 AJOUT : Sélectionne le projet si l'IA l'a trouvé
         id_projet: advice.suggestedProject ? advice.suggestedProject.id_projet : prev.id_projet 
     }));
     toast.success("Configuration appliquée !", { icon: "✨" });
-};
-
-// ... (Le reste du fichier reste identique)
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,8 +133,15 @@ const applySuggestion = () => {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ...form, id_employe: user.id_employe, id_salle: form.id_salle || undefined, id_ressource: form.id_ressource || undefined })
         });
-        if (res.ok) { toast.success("Réservation validée !"); router.push("/employe/dashboard"); } 
-        else { const err = await res.json(); toast.error(err.error || "Erreur"); }
+        if (res.ok) { 
+            toast.success("Réservation validée !"); 
+            router.push("/employe/dashboard"); 
+        } 
+        else { 
+            const err = await res.json(); 
+            // Affichage spécifique si c'est un conflit de congé
+            toast.error(err.error || "Erreur lors de la réservation"); 
+        }
     } catch (e) { toast.error("Erreur serveur"); }
   };
 
@@ -144,11 +151,15 @@ const applySuggestion = () => {
   return (
     <div className="min-h-screen p-6 md:p-10 text-gray-200 bg-[#030712]">
       <div className="max-w-7xl mx-auto animate-fade-in-up">
+        
+        {/* HEADER */}
         <div className="flex flex-col md:flex-row items-center justify-between mb-8 glass-panel p-6 rounded-2xl shadow-lg border border-white/10">
             <div className="flex items-center gap-4"><div className="p-3 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl border border-white/10 text-white"><CalendarRange className="w-8 h-8" /></div><div><h1 className="text-2xl font-bold text-white">Nouvelle Réservation</h1><p className="text-gray-400 text-sm">Assistant IA activé (Quota: {isAdmin ? "Illimité" : "2/10min"})</p></div></div>
             <Link href="/employe/dashboard" className="px-5 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition text-sm font-bold flex items-center gap-2 text-white"><ArrowLeft className="w-4 h-4" /> Retour</Link>
         </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* FORMULAIRE GAUCHE */}
             <div className="lg:col-span-2">
                 <div className="glass-panel p-8 rounded-2xl border border-white/10 shadow-2xl bg-[#0f172a]/50">
                     <h2 className="text-lg font-bold mb-6 text-white border-b border-white/10 pb-4 flex items-center gap-2"><Search className="w-5 h-5 text-blue-400" /> Vos Critères</h2>
@@ -160,10 +171,13 @@ const applySuggestion = () => {
                                 <button type="button" onClick={handleAnalyzeAI} disabled={analyzing || isQuotaFull || !form.objet} className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-lg ${isQuotaFull ? "bg-gray-800 text-gray-500 cursor-not-allowed" : "bg-gradient-to-r from-blue-600 to-purple-600 text-white"}`}>{analyzing ? <Loader2 className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>} {analyzing ? "Analyse..." : "Générer avec IA"}</button>
                             </div>
                         </div>
+                        
+                        {/* INPUTS DATES CORRIGÉS */}
                         <div className="grid grid-cols-2 gap-4">
-                            <div><label className="text-[10px] font-bold text-gray-500 uppercase block">Début</label><input type="datetime-local" className="glass-input w-full text-xs" required value={form.date_debut} onChange={e => setForm({...form, date_debut: e.target.value})} /></div>
-                            <div><label className="text-[10px] font-bold text-gray-500 uppercase block">Fin</label><input type="datetime-local" className="glass-input w-full text-xs" required value={form.date_fin} onChange={e => setForm({...form, date_fin: e.target.value})} /></div>
+                            <div><label className="text-[10px] font-bold text-gray-500 uppercase block">Début</label><input type="datetime-local" className="glass-input w-full text-xs [color-scheme:dark]" required value={form.date_debut} onChange={e => setForm({...form, date_debut: e.target.value})} /></div>
+                            <div><label className="text-[10px] font-bold text-gray-500 uppercase block">Fin</label><input type="datetime-local" className="glass-input w-full text-xs [color-scheme:dark]" required value={form.date_fin} onChange={e => setForm({...form, date_fin: e.target.value})} /></div>
                         </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Projet</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_projet} onChange={e => setForm({...form, id_projet: e.target.value})} required><option value="">-- Sélectionner --</option>{mesProjets.map(p => <option key={p.id_projet} value={p.id_projet}>{p.nom_projet}</option>)}</select></div>
                             <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block flex justify-between">Salle {checking && <span className="text-blue-400 text-[9px] animate-pulse">Vérif...</span>}</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_salle} onChange={e => setForm({...form, id_salle: e.target.value})}><option value="">-- Aucune --</option>{salles.map(s => { const isTaken = occupied.rooms.includes(s.id_salle); return <option key={s.id_salle} value={s.id_salle} disabled={isTaken} className={isTaken ? "bg-red-900/20 text-gray-500" : "text-white"}>{s.nom_salle} {isTaken ? "🔴" : `(${s.capacite}p)`}</option> })}</select></div>
@@ -173,6 +187,8 @@ const applySuggestion = () => {
                     </form>
                 </div>
             </div>
+
+            {/* PANEL IA DROITE */}
             <div className="lg:col-span-1">
                 <div className="glass-panel p-6 rounded-2xl border border-blue-500/30 bg-gradient-to-b from-blue-900/20 to-[#0f172a] shadow-xl sticky top-8 h-fit">
                     <div className="flex items-center gap-3 mb-6 border-b border-blue-500/30 pb-4"><div className="bg-blue-500/20 p-2 rounded-lg text-blue-400"><Sparkles className="w-6 h-6" /></div><div><h3 className="font-bold text-white text-lg">Proposition IA</h3><p className="text-xs text-blue-300">Analyse intelligente</p></div></div>

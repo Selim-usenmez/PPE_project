@@ -8,7 +8,7 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// --- LOGS IA (QUOTAS) ---
+// --- LOGS IA ---
 model AiLog {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -45,19 +45,22 @@ model Employe {
   historique_ia       AiLog[]
   notesPerso          NotePerso[]
   
-  // 👇 NOUVEAU : RELATIONS TÂCHES
+  // TÂCHES
   tachesRecues        Tache[] @relation("TacheRecue")
   tachesDonnees       Tache[] @relation("TacheDonnee")
+
+  // 👇 NOUVEAU : CONGÉS
+  conges              Conge[]
 
   @@map("employes")
 }
 
+// --- TÂCHES ---
 model Tache {
   id_tache      String   @id @default(cuid())
   titre         String
   description   String?
-  // SUPPRIMER LA LIGNE SUIVANTE QUI ETAIT EN DOUBLE :
-  // statut        String   @default("A_FAIRE") 
+  statut        StatutTache @default(A_FAIRE)
   
   id_projet     String?
   projet        Projet?  @relation(fields: [id_projet], references: [id_projet])
@@ -71,11 +74,75 @@ model Tache {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   
-  // GARDER UNIQUEMENT CELLE-CI (Version Enum) :
-  statut        StatutTache @default(A_FAIRE)
-  
   @@map("taches")
 }
+
+// --- NOTES PERSO ---
+model NotePerso {
+  id_note       String   @id @default(cuid())
+  contenu       String
+  createdAt     DateTime @default(now())
+  id_employe    String
+  employe       Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
+  @@map("notes_perso")
+}
+
+// --- PROJETS ---
+model Projet {
+  id_projet      String     @id @default(cuid())
+  nom_projet     String
+  description    String?
+  date_debut     DateTime
+  date_fin       DateTime?
+  statut         StatutProjet @default(EN_COURS)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  participations ParticipationProjet[]
+  reservations   ReservationSalle[]
+  taches         Tache[] 
+  @@map("projets")
+}
+
+// --- RH : OFFRES D'EMPLOI ---
+model OffreEmploi {
+  id_offre      String   @id @default(cuid())
+  titre         String
+  description   String
+  poste         String   
+  statut        String   @default("OUVERTE") // OUVERTE, FERMEE
+  createdAt     DateTime @default(now())
+  candidatures  Candidature[]
+  @@map("offres_emploi")
+}
+
+// --- RH : CANDIDATURES ---
+model Candidature {
+  id_candidat   String   @id @default(cuid())
+  nom           String
+  email         String
+  cv_url        String? 
+  statut        String   @default("EN_ATTENTE") // EN_ATTENTE, ACCEPTE, REFUSE
+  createdAt     DateTime @default(now())
+  id_offre      String
+  offre         OffreEmploi @relation(fields: [id_offre], references: [id_offre])
+  @@map("candidatures")
+}
+
+// --- RH : CONGÉS ---
+model Conge {
+  id_conge      String   @id @default(cuid())
+  type          String   // VACANCES, MALADIE, RTT
+  date_debut    DateTime
+  date_fin      DateTime
+  statut        String   @default("EN_ATTENTE") // EN_ATTENTE, VALIDE, REFUSE
+  commentaire   String?
+  createdAt     DateTime @default(now())
+  id_employe    String
+  employe       Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
+  @@map("conges")
+}
+
+// ... (Le reste : HistoriqueAction, DemandeMdp, ParticipationProjet, Ressource, Salle, ReservationSalle, Signalement reste inchangé, copie-les si besoin ou garde ton fichier actuel pour cette partie)
 
 // --- AUTRES MODÈLES ---
 model HistoriqueAction {
@@ -99,35 +166,6 @@ model DemandeMdp {
   @@map("demandes_mdp")
 }
 
-model Projet {
-  id_projet      String     @id @default(cuid())
-  nom_projet     String
-  description    String?
-  date_debut     DateTime
-  date_fin       DateTime?
-  statut         StatutProjet @default(EN_COURS)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  participations ParticipationProjet[]
-  reservations   ReservationSalle[]
-  
-  // 👇 AJOUTE CETTE LIGNE :
-  taches         Tache[] 
-
-  @@map("projets")
-}
-
-model NotePerso {
-  id_note       String   @id @default(cuid())
-  contenu       String
-  createdAt     DateTime @default(now())
-  
-  id_employe    String
-  employe       Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
-
-  @@map("notes_perso")
-}
-
 model ParticipationProjet {
   id_participation String   @id @default(cuid())
   id_employe       String
@@ -148,13 +186,13 @@ model Ressource {
   type             TypeRessource
   etat             EtatRessource @default(DISPONIBLE)
   localisation     String?
-  numero_serie     String?       @unique
+  numero_serie     String?        @unique
   date_acquisition DateTime?
   description      String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
   id_emprunteur    String?
-  emprunteur       Employe?      @relation("Emprunt", fields: [id_emprunteur], references: [id_employe], onDelete: SetNull)
+  emprunteur       Employe?       @relation("Emprunt", fields: [id_emprunteur], references: [id_employe], onDelete: SetNull)
   signalements     Signalement[]
   reservations     ReservationSalle[]
   @@map("ressources")
@@ -207,6 +245,7 @@ model Signalement {
   @@map("signalements")
 }
 
+// --- ENUMS ---
 enum Role {
   ADMIN
   CHEF_DE_PROJET
