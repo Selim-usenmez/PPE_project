@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CalendarRange, ArrowLeft, MapPin, Briefcase, FileText, Clock, Save, Loader2, Lightbulb, Box, Search, Sparkles, CheckCircle2, CalendarCheck, Lock } from "lucide-react";
+import { CalendarRange, ArrowLeft, Search, Sparkles, CheckCircle2, CalendarCheck, Lock, Save, Loader2, Lightbulb } from "lucide-react";
 
-// Fonction de formatage pour l'input datetime-local (Gère le fuseau horaire local)
+// Fonction de formatage
 const formatForInput = (d: string | Date) => {
     try {
         const date = new Date(d);
@@ -34,12 +34,19 @@ export default function EmployeReservationsPage() {
 
   const [form, setForm] = useState({ id_salle: "", id_ressource: "", id_projet: "", date_debut: "", date_fin: "", objet: "" });
 
+  // 🛑 CALCUL DE LA DATE MINIMUM (MAINTENANT)
+  const [minDate, setMinDate] = useState("");
+
   useEffect(() => {
     const initData = async () => {
       const stored = localStorage.getItem("user_info");
       if (!stored) { router.push("/login"); return; }
       const currentUser = JSON.parse(stored);
       setUser(currentUser);
+
+      // Calcul date min pour l'input
+      const now = new Date();
+      setMinDate(formatForInput(now));
 
       const savedQuota = localStorage.getItem(`ai_quota_${currentUser.id_employe}`);
       if(savedQuota) {
@@ -57,7 +64,7 @@ export default function EmployeReservationsPage() {
         setSalles(resSalles); setRessources(resRessources); setMesProjets(Array.isArray(resProjets) ? resProjets : []);
         
         // Initialiser dates (Maintenant -> +1h)
-        const now = new Date(); now.setMinutes(0,0,0); const end = new Date(now); end.setHours(end.getHours() + 1);
+        const end = new Date(now); end.setHours(end.getHours() + 1);
         setForm(f => ({ ...f, date_debut: formatForInput(now), date_fin: formatForInput(end) }));
         
         if (Array.isArray(resProjets) && resProjets.length > 0) setForm(f => ({ ...f, id_projet: resProjets[0].id_projet }));
@@ -77,7 +84,7 @@ export default function EmployeReservationsPage() {
     return () => clearInterval(interval);
   }, [quotaResetTime, user]);
 
-  // Vérification Dispo en Temps Réel
+  // Vérification Dispo
   useEffect(() => {
     const checkAvailability = async () => {
         if (!form.date_debut || !form.date_fin) return;
@@ -96,7 +103,7 @@ export default function EmployeReservationsPage() {
     if (!form.objet || form.objet.length < 5) return toast.warning("Décrivez d'abord votre besoin.");
     setAnalyzing(true);
     try {
-        const res = await fetch("/api/reservations/recommend", { // Note : Vérifie que l'URL est bien /api/reservations/recommend OU /api/recommend selon ton fichier route.ts
+        const res = await fetch("/api/reservations/recommend", { 
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ start: form.date_debut, end: form.date_fin, objet: form.objet, userId: user.id_employe })
         });
@@ -110,7 +117,6 @@ export default function EmployeReservationsPage() {
     } catch (e) { toast.error("Erreur connexion"); } finally { setAnalyzing(false); }
   };
 
-  // Appliquer Suggestion IA
   const applySuggestion = () => {
     if (!advice) return;
     setForm(prev => ({
@@ -127,11 +133,21 @@ export default function EmployeReservationsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (new Date(form.date_debut) >= new Date(form.date_fin)) return toast.error("Dates invalides");
+    if (new Date(form.date_debut) >= new Date(form.date_fin)) return toast.error("La date de fin doit être après le début");
+    
+    // Vérification locale (UI) pour le passé
+    if (new Date(form.date_debut) < new Date()) return toast.error("Impossible de réserver dans le passé !");
+
     try {
         const res = await fetch("/api/reservations", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...form, id_employe: user.id_employe, id_salle: form.id_salle || undefined, id_ressource: form.id_ressource || undefined })
+            body: JSON.stringify({ 
+                ...form, 
+                id_employe: user.id_employe, 
+                id_salle: form.id_salle || undefined, 
+                id_ressource: form.id_ressource || undefined,
+                id_projet: form.id_projet || undefined
+            })
         });
         if (res.ok) { 
             toast.success("Réservation validée !"); 
@@ -139,7 +155,6 @@ export default function EmployeReservationsPage() {
         } 
         else { 
             const err = await res.json(); 
-            // Affichage spécifique si c'est un conflit de congé
             toast.error(err.error || "Erreur lors de la réservation"); 
         }
     } catch (e) { toast.error("Erreur serveur"); }
@@ -152,7 +167,6 @@ export default function EmployeReservationsPage() {
     <div className="min-h-screen p-6 md:p-10 text-gray-200 bg-[#030712]">
       <div className="max-w-7xl mx-auto animate-fade-in-up">
         
-        {/* HEADER */}
         <div className="flex flex-col md:flex-row items-center justify-between mb-8 glass-panel p-6 rounded-2xl shadow-lg border border-white/10">
             <div className="flex items-center gap-4"><div className="p-3 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl border border-white/10 text-white"><CalendarRange className="w-8 h-8" /></div><div><h1 className="text-2xl font-bold text-white">Nouvelle Réservation</h1><p className="text-gray-400 text-sm">Assistant IA activé (Quota: {isAdmin ? "Illimité" : "2/10min"})</p></div></div>
             <Link href="/employe/dashboard" className="px-5 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition text-sm font-bold flex items-center gap-2 text-white"><ArrowLeft className="w-4 h-4" /> Retour</Link>
@@ -172,17 +186,38 @@ export default function EmployeReservationsPage() {
                             </div>
                         </div>
                         
-                        {/* INPUTS DATES CORRIGÉS */}
+                        {/* INPUTS DATES CORRIGÉS AVEC MIN */}
                         <div className="grid grid-cols-2 gap-4">
-                            <div><label className="text-[10px] font-bold text-gray-500 uppercase block">Début</label><input type="datetime-local" className="glass-input w-full text-xs [color-scheme:dark]" required value={form.date_debut} onChange={e => setForm({...form, date_debut: e.target.value})} /></div>
-                            <div><label className="text-[10px] font-bold text-gray-500 uppercase block">Fin</label><input type="datetime-local" className="glass-input w-full text-xs [color-scheme:dark]" required value={form.date_fin} onChange={e => setForm({...form, date_fin: e.target.value})} /></div>
+                            <div>
+                                <label className="text-[10px] font-bold text-gray-500 uppercase block">Début</label>
+                                <input 
+                                    type="datetime-local" 
+                                    className="glass-input w-full text-xs [color-scheme:dark]" 
+                                    required 
+                                    min={minDate} // 🛑 BLOCAGE VISUEL PASSÉ
+                                    value={form.date_debut} 
+                                    onChange={e => setForm({...form, date_debut: e.target.value})} 
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-gray-500 uppercase block">Fin</label>
+                                <input 
+                                    type="datetime-local" 
+                                    className="glass-input w-full text-xs [color-scheme:dark]" 
+                                    required 
+                                    min={minDate} // 🛑 BLOCAGE VISUEL PASSÉ
+                                    value={form.date_fin} 
+                                    onChange={e => setForm({...form, date_fin: e.target.value})} 
+                                />
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Projet</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_projet} onChange={e => setForm({...form, id_projet: e.target.value})} required><option value="">-- Sélectionner --</option>{mesProjets.map(p => <option key={p.id_projet} value={p.id_projet}>{p.nom_projet}</option>)}</select></div>
+                            <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Projet</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_projet} onChange={e => setForm({...form, id_projet: e.target.value})}><option value="">-- Sélectionner --</option>{mesProjets.map(p => <option key={p.id_projet} value={p.id_projet}>{p.nom_projet}</option>)}</select></div>
                             <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block flex justify-between">Salle {checking && <span className="text-blue-400 text-[9px] animate-pulse">Vérif...</span>}</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_salle} onChange={e => setForm({...form, id_salle: e.target.value})}><option value="">-- Aucune --</option>{salles.map(s => { const isTaken = occupied.rooms.includes(s.id_salle); return <option key={s.id_salle} value={s.id_salle} disabled={isTaken} className={isTaken ? "bg-red-900/20 text-gray-500" : "text-white"}>{s.nom_salle} {isTaken ? "🔴" : `(${s.capacite}p)`}</option> })}</select></div>
                         </div>
                         <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Matériel</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_ressource} onChange={e => setForm({...form, id_ressource: e.target.value})}><option value="">-- Aucun --</option>{ressources.map(r => { const isTaken = occupied.resources.includes(r.id_ressource); return <option key={r.id_ressource} value={r.id_ressource} disabled={isTaken} className={isTaken ? "bg-red-900/20 text-gray-500" : "text-white"}>{r.nom_ressource}</option> })}</select></div>
+                        
                         <button type="submit" disabled={mesProjets.length === 0 || checking} className="w-full btn-neon-blue py-4 rounded-xl font-bold mt-4 shadow-lg flex items-center justify-center gap-2 text-white text-lg hover:scale-[1.01] transition-transform disabled:opacity-50">{checking ? <Loader2 className="animate-spin w-5 h-5"/> : <Save className="w-5 h-5"/>} Confirmer la réservation</button>
                     </form>
                 </div>

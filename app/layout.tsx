@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Gestion PPE",
+  title: "PPE_clientlg US",
   description: "Application de gestion de ressources",
 };
 

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { 
   Settings, LogOut, Calendar, AlertTriangle, Briefcase, Clock, MapPin, Loader2, 
   Plus, Trash2, Edit3, X, FolderOpen, ShieldCheck, User, 
-  CheckCircle2, BellRing, StickyNote, Sun, XCircle
+  CheckCircle2, BellRing, StickyNote, Sun, XCircle, Box
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -16,23 +16,18 @@ import interactionPlugin from "@fullcalendar/interaction";
 import frLocale from '@fullcalendar/core/locales/fr';
 import { can, canAssignTasks, canAccessAdminPanel } from "@/lib/permissions";
 
-// ✅ FONCTION DE FORMATAGE ROBUSTE
+// Formatage Date pour input
 const formatForInput = (d: any) => {
     if (!d) return "";
     try {
         const date = new Date(d);
-        // Ajustement fuseau horaire pour que l'input affiche la bonne heure locale
         const offset = date.getTimezoneOffset() * 60000;
-        const localISOTime = (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
-        return localISOTime;
+        return (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
     } catch (e) { return ""; }
 };
 
-// --- RENDER CUSTOM (Gestion Affichage Congé vs Réservation) ---
 function renderEventContent(eventInfo: any) {
     const props = eventInfo.event.extendedProps;
-    
-    // CAS 1 : C'est un CONGÉ
     if (props.type === 'CONGE') {
         const isMe = props.isMine;
         return (
@@ -42,8 +37,6 @@ function renderEventContent(eventInfo: any) {
             </div>
         );
     }
-
-    // CAS 2 : C'est une RÉSERVATION
     const isMine = props.isMine;
     return (
       <div className={`w-full h-full p-1.5 flex flex-col justify-start rounded-md border-l-4 ${isMine ? 'border-blue-400 bg-blue-600/20' : 'border-gray-500 bg-gray-700/20'} overflow-hidden`}>
@@ -52,11 +45,10 @@ function renderEventContent(eventInfo: any) {
             {eventInfo.timeText}
         </div>
         <div className="font-bold text-xs truncate leading-tight">{eventInfo.event.title}</div>
-        {props.nom_salle && (
-            <div className="text-[9px] mt-1 flex items-center gap-1 opacity-70 truncate">
-                <MapPin className="w-2.5 h-2.5" /> {props.nom_salle}
-            </div>
-        )}
+        <div className="flex flex-col gap-0.5 mt-1">
+            {props.nom_salle && <div className="text-[9px] flex items-center gap-1 opacity-70 truncate"><MapPin className="w-2.5 h-2.5" /> {props.nom_salle}</div>}
+            {props.nom_ressource && <div className="text-[9px] flex items-center gap-1 opacity-70 truncate text-orange-300"><Box className="w-2.5 h-2.5" /> {props.nom_ressource}</div>}
+        </div>
       </div>
     );
 }
@@ -66,23 +58,20 @@ export default function EmployeDashboard() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
-  // Données
   const [allSalles, setAllSalles] = useState<any[]>([]);
   const [allRessources, setAllRessources] = useState<any[]>([]);
   const [dispoSalles, setDispoSalles] = useState<any[]>([]);
   const [dispoRessources, setDispoRessources] = useState<any[]>([]);
   const [checkingDispo, setCheckingDispo] = useState(false);
 
-  const [events, setEvents] = useState<any[]>([]); 
+  const [events, setEvents] = useState<any[]>([]);
   const [mesProjets, setMesProjets] = useState<any[]>([]);
   const [mesTaches, setMesTaches] = useState<any[]>([]);
   const [mesNotes, setMesNotes] = useState<any[]>([]);
   const [mesConges, setMesConges] = useState<any[]>([]);
-  const [employesList, setEmployesList] = useState<any[]>([]); 
-
+  
   const [stats, setStats] = useState({ projets: 0, reservations: 0, taches: 0 });
 
-  // Modales
   const [showModalEvent, setShowModalEvent] = useState(false);
   const [showModalProjets, setShowModalProjets] = useState(false);
   const [showModalAssignTask, setShowModalAssignTask] = useState(false);
@@ -91,13 +80,18 @@ export default function EmployeDashboard() {
   const [editMode, setEditMode] = useState(false);
   const [displayEvent, setDisplayEvent] = useState<any>({});
   const [formData, setFormData] = useState({ id: "", objet: "", start: "", end: "", id_salle: "", id_ressource: "" });
+  
   const [taskForm, setTaskForm] = useState({ titre: "", id_assigne_a: "", id_projet: "" });
-  const [noteInput, setNoteInput] = useState("");
-  const [noteToPlanId, setNoteToPlanId] = useState<string | null>(null);
   const [congeForm, setCongeForm] = useState({ type: "VACANCES", date_debut: "", date_fin: "", commentaire: "" });
-
   const [projetCible, setProjetCible] = useState<any>(null);
   const [equipeProjet, setEquipeProjet] = useState<any[]>([]);
+
+  const [noteInput, setNoteInput] = useState("");
+  const [noteToPlanId, setNoteToPlanId] = useState<string | null>(null);
+  const [taskToPlanId, setTaskToPlanId] = useState<string | null>(null);
+
+  // 🛑 DATE MINIMUM (MAINTENANT)
+  const [minDate, setMinDate] = useState("");
 
   useEffect(() => {
     const checkSession = async () => {
@@ -106,6 +100,10 @@ export default function EmployeDashboard() {
             if (!res.ok) { localStorage.removeItem("user_info"); router.push("/login"); return; }
             const updatedUser = await res.json();
             setUser(updatedUser);
+            
+            // 🛑 Initialiser la date min à "Maintenant"
+            setMinDate(formatForInput(new Date()));
+
             loadData(updatedUser.id_employe, updatedUser.role);
         } catch (e) { router.push("/login"); }
     };
@@ -152,7 +150,7 @@ export default function EmployeDashboard() {
         promises.push(fetch("/api/employes").then(r => r.json()));
     }
 
-    const [resas, projets, sallesData, ressourcesData, tachesData, notesData, congesData, allEmployes] = await Promise.all(promises);
+    const [resas, projets, sallesData, ressourcesData, tachesData, notesData, congesData] = await Promise.all(promises);
 
     setAllSalles(sallesData);
     setAllRessources(ressourcesData);
@@ -163,7 +161,6 @@ export default function EmployeDashboard() {
     setMesTaches(Array.isArray(tachesData) ? tachesData : []);
     setMesNotes(Array.isArray(notesData) ? notesData : []);
     setMesConges(Array.isArray(congesData) ? congesData : []);
-    if (allEmployes) setEmployesList(allEmployes);
 
     setStats({
         reservations: (resas as any)?.length || 0,
@@ -176,8 +173,6 @@ export default function EmployeDashboard() {
 
   const fetchReservations = async (userId: string, role: string) => {
       let finalEvents: any[] = [];
-
-      // 1. RÉSERVATIONS
       const resResa = await fetch(`/api/reservations?userId=${userId}&refresh=${Date.now()}`);
       if(resResa.ok) {
           const dataResa = await resResa.json();
@@ -187,182 +182,92 @@ export default function EmployeDashboard() {
              start: evt.date_debut, end: evt.date_fin,
              backgroundColor: 'transparent', borderColor: 'transparent',
              editable: evt.id_employe === userId,
-             extendedProps: { 
-                 ...evt, 
-                 isMine: evt.id_employe === userId,
-                 nom_salle: evt.salle?.nom_salle || (evt.ressource ? evt.ressource.nom_ressource : null),
-                 type: 'RESERVATION'
-             }
+             extendedProps: { isMine: evt.id_employe === userId, nom_salle: evt.salle?.nom_salle, nom_ressource: evt.ressource?.nom_ressource, type: 'RESERVATION' }
           }));
           finalEvents = [...finalEvents, ...resaEvents];
       }
-
-      // 2. CONGÉS
       const param = role === 'CHEF_DE_PROJET' ? `managerId=${userId}` : `userId=${userId}`;
       const resConges = await fetch(`/api/conges?${param}`);
       if(resConges.ok) {
           const dataConges = await resConges.json();
-          const congesEvents = dataConges.map((c: any) => {
-              const isMe = c.id_employe === userId;
-              return {
-                  id: c.id_conge,
-                  title: isMe ? `🌴 Mon Congé` : `⛔ ${c.employe.prenom} ${c.employe.nom[0]}.`,
-                  start: c.date_debut,
-                  end: c.date_fin,
-                  allDay: true,
-                  backgroundColor: 'transparent', borderColor: 'transparent',
-                  editable: false,
-                  extendedProps: { 
-                      isMine: isMe,
-                      type: 'CONGE'
-                  }
-              };
-          });
+          const congesEvents = dataConges.map((c: any) => ({
+              id: c.id_conge,
+              title: c.id_employe === userId ? `🌴 Mon Congé` : `⛔ ${c.employe.prenom} ${c.employe.nom[0]}.`,
+              start: c.date_debut,
+              end: c.date_fin,
+              allDay: true,
+              backgroundColor: 'transparent', borderColor: 'transparent',
+              editable: false,
+              extendedProps: { isMine: c.id_employe === userId, type: 'CONGE' }
+          }));
           finalEvents = [...finalEvents, ...congesEvents];
       }
-
       setEvents(finalEvents);
       return finalEvents;
   };
 
-  // --- ACTIONS ---
-  const handleRequestConge = async (e: React.FormEvent) => {
-      e.preventDefault();
-      try {
-          const res = await fetch("/api/conges", {
-              method: "POST", headers: {"Content-Type":"application/json"},
-              body: JSON.stringify({ ...congeForm, id_employe: user.id_employe })
-          });
-          if(res.ok) {
-              toast.success("Demande envoyée !");
-              setCongeForm({ type: "VACANCES", date_debut: "", date_fin: "", commentaire: "" });
-              setShowModalConges(false);
-              loadData(user.id_employe, user.role); 
-          } else { toast.error("Erreur envoi"); }
-      } catch(e) { toast.error("Erreur serveur"); }
-  };
-
-  const handleAddNote = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if(!noteInput.trim()) return;
-      try {
-          await fetch("/api/notes", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ contenu: noteInput, id_employe: user.id_employe }) });
-          setNoteInput("");
-          const newNotes = await fetch(`/api/notes?userId=${user.id_employe}`).then(r => r.json());
-          setMesNotes(newNotes);
-          toast.success("Note ajoutée");
-      } catch(e) { toast.error("Erreur"); }
-  };
-
-  const handleDeleteNote = async (id_note: string) => {
-      await fetch(`/api/notes?id=${id_note}`,    { method: "DELETE" });
-      setMesNotes(mesNotes.filter(n => n.id_note !== id_note));
-  };
-
-  const handlePlanNote = (note: any) => {
-      const now = new Date();
-      const end = new Date(now.getTime() + 60*60*1000); 
-      setFormData({ id: "", objet: note.contenu, start: formatForInput(now), end: formatForInput(end), id_salle: "", id_ressource: "" });
-      setNoteToPlanId(note.id_note);
-      setEditMode(true);
-      setShowModalEvent(true);
-  };
-
-  const handlePlanTask = (tache: any) => {
-      const now = new Date();
-      const end = new Date(now.getTime() + 60*60*1000); 
-      setFormData({ id: "", objet: `Travail : ${tache.titre}`, start: formatForInput(now), end: formatForInput(end), id_salle: "", id_ressource: "" });
-      fetch("/api/taches", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id_tache: tache.id_tache, statut: "PLANIFIE" }) });
-      setEditMode(true);
-      setShowModalEvent(true);
-  };
-
-  const handleFinishTask = async (id_tache: string) => {
-      await fetch("/api/taches", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id_tache, statut: "TERMINE" }) });
-      toast.success("Tâche terminée !");
-      loadData(user.id_employe, user.role); 
-  };
-
-  const handleOpenAssign = async (projet: any) => {
-      setProjetCible(projet); 
-      setTaskForm({ titre: "", id_assigne_a: "", id_projet: "" });
-      try {
-          const res = await fetch(`/api/projets/${projet.id_projet}/membres`);
-          if (res.ok) {
-              const membres = await res.json();
-              const uniqueMembres = membres.filter((v:any,i:any,a:any)=>a.findIndex((t:any)=>(t.id_employe===v.id_employe))===i);
-              setEquipeProjet(uniqueMembres.filter((m: any) => m.id_employe !== user.id_employe));
-              setShowModalAssignTask(true);
-          }
-      } catch(e) { toast.error("Erreur équipe"); }
-  };
-
-  const handleAssignTask = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!projetCible) return;
-      try {
-          const res = await fetch("/api/taches", { 
-              method: "POST", headers: {"Content-Type":"application/json"}, 
-              body: JSON.stringify({ ...taskForm, id_projet: projetCible.id_projet, id_assigne_par: user.id_employe }) 
-          });
-          if(res.ok) { toast.success("Tâche envoyée !"); setShowModalAssignTask(false); }
-          else { 
-              const err = await res.json();
-              toast.error(err.error || "Erreur"); 
-          }
-      } catch(err) { toast.error("Erreur"); }
-  };
-  
   const handleEventClick = (info: any) => {
-      const event = info.event;
-      const props = event.extendedProps;
-      if (props.type === 'CONGE') return;
-
-      setDisplayEvent({ ...props, start: event.start, end: event.end, isMine: props.isMine });
-      setFormData({ 
-          id: event.id, 
-          objet: props.objet, 
-          start: formatForInput(event.start), 
-          end: formatForInput(event.end), 
-          id_salle: props.id_salle || "", 
-          id_ressource: props.id_ressource || "" 
-      });
-      setEditMode(false);
-      setShowModalEvent(true);
+      const event = info.event; const props = event.extendedProps; if (props.type === 'CONGE') return;
+      setDisplayEvent({ title: event.title, start: event.start, end: event.end, isMine: props.isMine, nom_salle: props.nom_salle || "Aucune salle", nom_ressource: props.nom_ressource || "Aucun matériel" });
+      setFormData({ id: event.id, objet: event.title, start: formatForInput(event.start), end: formatForInput(event.end), id_salle: props.id_salle || "", id_ressource: props.id_ressource || "" });
+      setEditMode(false); setShowModalEvent(true);
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
       e.preventDefault();
+      
+      // 🛑 VÉRIFICATION FRONTEND : PAS DE PASSÉ
+      if (new Date(formData.start) < new Date()) {
+          return toast.error("⛔ Impossible de planifier dans le passé !");
+      }
+
       try {
           const payload = { ...formData, date_debut: new Date(formData.start).toISOString(), date_fin: new Date(formData.end).toISOString() };
           const method = formData.id ? "PUT" : "POST";
           const bodyPayload = formData.id ? { ...payload, id_reservation: formData.id } : { ...payload, id_employe: user.id_employe };
+          
           const res = await fetch("/api/reservations", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(bodyPayload) });
+          
           if(res.ok) { 
-              toast.success(formData.id ? "Modifié !" : "Créé !"); 
+              toast.success("Sauvegardé !"); 
               if (noteToPlanId) { await handleDeleteNote(noteToPlanId); setNoteToPlanId(null); }
+              if (taskToPlanId) { await fetch("/api/taches", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id_tache: taskToPlanId, statut: "PLANIFIE" }) }); setTaskToPlanId(null); }
               loadData(user.id_employe, user.role); 
               setShowModalEvent(false); 
           } else { 
               const err = await res.json();
-              toast.error(err.error || "Erreur"); 
+              toast.error(err.error || "Erreur conflit"); 
           }
       } catch (err) { toast.error("Erreur"); }
   };
 
-  const handleDelete = async () => {
-      if(!window.confirm("Supprimer ?")) return;
-      await fetch(`/api/reservations?id=${formData.id}`, { method: "DELETE" });
-      loadData(user.id_employe, user.role);
-      setShowModalEvent(false);
+  const handleAddNote = async (e: React.FormEvent) => {
+      e.preventDefault(); if(!noteInput.trim()) return;
+      try { await fetch("/api/notes", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ contenu: noteInput, id_employe: user.id_employe }) }); setNoteInput(""); const newNotes = await fetch(`/api/notes?userId=${user.id_employe}`).then(r => r.json()); setMesNotes(newNotes); toast.success("Note ajoutée"); } catch(e) { toast.error("Erreur"); }
+  };
+  const handleDeleteNote = async (id_note: string) => { await fetch(`/api/notes?id=${id_note}`, { method: "DELETE" }); setMesNotes(mesNotes.filter(n => n.id_note !== id_note)); };
+  
+  const handlePlanNote = (note: any) => {
+      const now = new Date(); const end = new Date(now.getTime() + 60*60*1000); 
+      setFormData({ id: "", objet: note.contenu, start: formatForInput(now), end: formatForInput(end), id_salle: "", id_ressource: "" });
+      setNoteToPlanId(note.id_note); setEditMode(true); setShowModalEvent(true);
   };
 
-  const handleEventDropOrResize = async (info: any) => {
-      if (!info.event.extendedProps.isMine || info.event.extendedProps.type === 'CONGE') { info.revert(); return; }
-      const payload = { id_reservation: info.event.id, date_debut: info.event.start.toISOString(), date_fin: info.event.end.toISOString() };
-      await fetch("/api/reservations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const handlePlanTask = (tache: any) => {
+      const now = new Date(); const end = new Date(now.getTime() + 60*60*1000); 
+      setFormData({ id: "", objet: `Travail : ${tache.titre}`, start: formatForInput(now), end: formatForInput(end), id_salle: "", id_ressource: "" });
+      setTaskToPlanId(tache.id_tache); setEditMode(true); setShowModalEvent(true);
   };
 
+  const handleFinishTask = async (id_tache: string) => { await fetch("/api/taches", { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ id_tache, statut: "TERMINE" }) }); toast.success("Tâche terminée !"); loadData(user.id_employe, user.role); };
+  const handleRequestConge = async (e: React.FormEvent) => {
+      e.preventDefault();
+      try { const res = await fetch("/api/conges", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ ...congeForm, id_employe: user.id_employe }) }); if(res.ok) { toast.success("Demande envoyée !"); setCongeForm({ type: "VACANCES", date_debut: "", date_fin: "", commentaire: "" }); setShowModalConges(false); loadData(user.id_employe, user.role); } else { toast.error("Erreur envoi"); } } catch(e) { toast.error("Erreur serveur"); }
+  };
+  const handleOpenAssign = async (projet: any) => { setProjetCible(projet); setTaskForm({ titre: "", id_assigne_a: "", id_projet: "" }); try { const res = await fetch(`/api/projets/${projet.id_projet}/membres`); if (res.ok) { const membres = await res.json(); const uniqueMembres = membres.filter((v:any,i:any,a:any)=>a.findIndex((t:any)=>(t.id_employe===v.id_employe))===i); setEquipeProjet(uniqueMembres.filter((m: any) => m.id_employe !== user.id_employe)); setShowModalAssignTask(true); } } catch(e) { toast.error("Erreur équipe"); } };
+  const handleAssignTask = async (e: React.FormEvent) => { e.preventDefault(); if (!projetCible) return; try { const res = await fetch("/api/taches", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ ...taskForm, id_projet: projetCible.id_projet, id_assigne_par: user.id_employe }) }); if(res.ok) { toast.success("Tâche envoyée !"); setShowModalAssignTask(false); } else { const err = await res.json(); toast.error(err.error || "Erreur"); } } catch(err) { toast.error("Erreur"); } };
+  const handleDelete = async () => { if(!window.confirm("Supprimer ?")) return; await fetch(`/api/reservations?id=${formData.id}`, { method: "DELETE" }); loadData(user.id_employe, user.role); setShowModalEvent(false); };
+  const handleEventDropOrResize = async (info: any) => { if (!info.event.extendedProps.isMine || info.event.extendedProps.type === 'CONGE') { info.revert(); return; } const payload = { id_reservation: info.event.id, date_debut: info.event.start.toISOString(), date_fin: info.event.end.toISOString() }; await fetch("/api/reservations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); };
   const handleLogout = async () => { await fetch("/api/auth/logout", { method: "POST" }); localStorage.removeItem("user_info"); router.push("/login"); };
 
   if (!user) return <div className="min-h-screen bg-[#030712] flex items-center justify-center"><Loader2 className="animate-spin text-white"/></div>;
@@ -374,35 +279,11 @@ export default function EmployeDashboard() {
 
   return (
     <div className="min-h-screen bg-[#030712] text-gray-200 p-6 md:p-8 flex flex-col">
-      
-      {/* 🌟 CSS */}
-      <style jsx global>{`
-        .fc { font-family: 'Inter', sans-serif; border: none !important; }
-        .fc-toolbar-title { font-size: 1.8rem !important; font-weight: 800; background: linear-gradient(to right, #60a5fa, #a78bfa); -webkit-background-clip: text; color: transparent; text-transform: capitalize; }
-        .fc-button-primary { background-color: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; color: white !important; font-weight: 600; border-radius: 9999px !important; padding: 8px 16px !important; transition: all 0.2s; }
-        .fc-button-primary:hover { background-color: rgba(59, 130, 246, 0.2) !important; border-color: #3b82f6 !important; }
-        .fc-button-active { background-color: #2563EB !important; border-color: #2563EB !important; box-shadow: 0 0 15px rgba(37,99,235,0.4); }
-        .fc-theme-standard td, .fc-theme-standard th { border-color: rgba(255,255,255,0.03) !important; }
-        .fc-timegrid-slot { height: 40px !important; }
-        .fc-timegrid-slot-label { font-size: 0.75rem; color: #6b7280; font-weight: 500; }
-        .fc-timegrid-now-indicator-line { border-color: #ef4444; border-width: 2px; box-shadow: 0 0 10px #ef4444; }
-        .fc-timegrid-now-indicator-arrow { border-color: #ef4444; border-width: 6px; }
-        .fc-day-today { background-color: rgba(59, 130, 246, 0.03) !important; }
-        .fc-col-header-cell-cushion { color: #e5e7eb; padding: 15px 0 !important; font-weight: 700; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em; }
-        .fc-event { background: transparent !important; border: none !important; box-shadow: none !important; }
-      `}</style>
+      <style jsx global>{` .fc { font-family: 'Inter', sans-serif; border: none !important; } .fc-toolbar-title { font-size: 1.8rem !important; font-weight: 800; background: linear-gradient(to right, #60a5fa, #a78bfa); -webkit-background-clip: text; color: transparent; text-transform: capitalize; } .fc-button-primary { background-color: rgba(255, 255, 255, 0.05) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; color: white !important; font-weight: 600; border-radius: 9999px !important; padding: 8px 16px !important; transition: all 0.2s; } .fc-button-primary:hover { background-color: rgba(59, 130, 246, 0.2) !important; border-color: #3b82f6 !important; } .fc-button-active { background-color: #2563EB !important; border-color: #2563EB !important; box-shadow: 0 0 15px rgba(37,99,235,0.4); } .fc-theme-standard td, .fc-theme-standard th { border-color: rgba(255,255,255,0.03) !important; } .fc-timegrid-slot { height: 40px !important; } .fc-timegrid-slot-label { font-size: 0.75rem; color: #6b7280; font-weight: 500; } .fc-timegrid-now-indicator-line { border-color: #ef4444; border-width: 2px; box-shadow: 0 0 10px #ef4444; } .fc-timegrid-now-indicator-arrow { border-color: #ef4444; border-width: 6px; } .fc-day-today { background-color: rgba(59, 130, 246, 0.03) !important; } .fc-col-header-cell-cushion { color: #e5e7eb; padding: 15px 0 !important; font-weight: 700; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em; } .fc-event { background: transparent !important; border: none !important; box-shadow: none !important; } `}</style>
 
       <div className="max-w-[1920px] mx-auto w-full space-y-6 animate-fade-in flex-1 flex flex-col">
-        
-        {/* HEADER */}
         <header className="flex justify-between items-center glass-panel px-6 py-4 rounded-2xl border border-white/5">
-             <div className="flex items-center gap-4">
-                <div className="relative h-10 w-10"><Image src="/logo.png" alt="Logo" width={40} height={40} className="object-contain"/></div>
-                <div>
-                    <h1 className="text-xl font-bold text-white tracking-tight">Nexus<span className="text-blue-500">Pharm</span></h1>
-                    <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Espace {user.role?.replace('_', ' ')}</p>
-                </div>
-             </div>
+             <div className="flex items-center gap-4"><div className="relative h-10 w-10"><Image src="/logo.png" alt="Logo" width={40} height={40} className="object-contain"/></div><div><h1 className="text-xl font-bold text-white tracking-tight">Nexus<span className="text-blue-500">Pharm</span></h1><p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Espace {user.role?.replace('_', ' ')}</p></div></div>
              <div className="flex gap-2">
                 {canAccessAdminPanel(user.role) && <button onClick={() => router.push('/admin/dashboard')} className="px-4 py-2 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-400 font-bold flex items-center gap-2 hover:bg-purple-600/20 transition"><ShieldCheck className="w-4 h-4"/> Admin</button>}
                 {user.role === 'RH' && <button onClick={() => router.push('/rh/dashboard')} className="px-4 py-2 rounded-xl bg-pink-600/10 border border-pink-500/30 text-pink-400 font-bold flex items-center gap-2 hover:bg-pink-600/20 transition"><User className="w-4 h-4"/> Espace RH</button>}
@@ -411,30 +292,17 @@ export default function EmployeDashboard() {
              </div>
         </header>
 
-        {/* LAYOUT */}
         <div className="flex flex-col lg:flex-row gap-6 h-full flex-1">
-            
-            {/* SIDEBAR */}
             <div className="lg:w-[320px] space-y-4 flex flex-col h-full">
                 <div className="grid grid-cols-2 gap-3">
-                    <div className="glass-panel p-4 rounded-xl border-l-2 border-blue-500 bg-gradient-to-br from-blue-500/5 to-transparent">
-                        <p className="text-[10px] text-blue-400 font-bold uppercase mb-1">Projets</p>
-                        <p className="text-2xl font-bold text-white">{stats.projets}</p>
-                    </div>
-                    <div className="glass-panel p-4 rounded-xl border-l-2 border-orange-500 bg-gradient-to-br from-orange-500/5 to-transparent">
-                        <p className="text-[10px] text-orange-400 font-bold uppercase mb-1">Tâches</p>
-                        <p className="text-2xl font-bold text-white">{stats.taches}</p>
-                    </div>
+                    <div className="glass-panel p-4 rounded-xl border-l-2 border-blue-500 bg-gradient-to-br from-blue-500/5 to-transparent"><p className="text-[10px] text-blue-400 font-bold uppercase mb-1">Projets</p><p className="text-2xl font-bold text-white">{stats.projets}</p></div>
+                    <div className="glass-panel p-4 rounded-xl border-l-2 border-orange-500 bg-gradient-to-br from-orange-500/5 to-transparent"><p className="text-[10px] text-orange-400 font-bold uppercase mb-1">Tâches</p><p className="text-2xl font-bold text-white">{stats.taches}</p></div>
                 </div>
-
-                {/* BOUTONS D'ACTION */}
                 <div className="grid grid-cols-3 gap-2">
                     <button onClick={() => router.push('/employe/reservations')} className="p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl flex items-center justify-center transition shadow-lg shadow-blue-900/20"><Plus className="w-5 h-5"/></button>
                     <button onClick={() => setShowModalConges(true)} className="p-3 bg-pink-600 hover:bg-pink-500 text-white rounded-xl flex items-center justify-center transition shadow-lg shadow-pink-900/20" title="Poser des congés"><Sun className="w-5 h-5"/></button>
                     <button onClick={() => router.push('/employe/incidents')} className="p-3 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl flex items-center justify-center transition border border-white/5"><AlertTriangle className="w-5 h-5"/></button>
                 </div>
-
-                {/* NOTES */}
                 <div className="glass-panel p-5 rounded-2xl border border-white/10 flex-1 min-h-[200px] flex flex-col">
                     <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2"><StickyNote className="w-4 h-4 text-yellow-400"/> Notes Rapides</h3>
                     <form onSubmit={handleAddNote} className="flex gap-2 mb-3">
@@ -443,43 +311,19 @@ export default function EmployeDashboard() {
                     </form>
                     <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
                         {mesNotes.length === 0 && <p className="text-gray-600 text-xs italic text-center mt-4">Aucune note.</p>}
-                        {mesNotes.map(note => (
-                            <div key={note.id_note} className="p-3 bg-white/5 rounded-lg border border-white/5 flex justify-between items-start group hover:border-blue-500/30 transition">
-                                <p className="text-gray-300 text-xs leading-relaxed">{note.contenu}</p>
-                                <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition ml-2">
-                                    <button onClick={() => handlePlanNote(note)} className="text-blue-400 hover:text-white"><Calendar className="w-3 h-3"/></button>
-                                    <button onClick={() => handleDeleteNote(note.id_note)} className="text-red-400 hover:text-white"><X className="w-3 h-3"/></button>
-                                </div>
-                            </div>
-                        ))}
+                        {mesNotes.map(note => (<div key={note.id_note} className="p-3 bg-white/5 rounded-lg border border-white/5 flex justify-between items-start group hover:border-blue-500/30 transition"><p className="text-gray-300 text-xs leading-relaxed">{note.contenu}</p><div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition ml-2"><button onClick={() => handlePlanNote(note)} className="text-blue-400 hover:text-white"><Calendar className="w-3 h-3"/></button><button onClick={() => handleDeleteNote(note.id_note)} className="text-red-400 hover:text-white"><X className="w-3 h-3"/></button></div></div>))}
                     </div>
                 </div>
-
-                {/* TÂCHES */}
                 <div className="glass-panel p-5 rounded-2xl border border-white/10 flex-1 min-h-[200px] flex flex-col">
                     <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2"><BellRing className="w-4 h-4 text-orange-400"/> Tâches Assignées</h3>
                     <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
                         {mesTaches.filter(t => t.statut === 'A_FAIRE').length === 0 && <p className="text-gray-600 text-xs italic text-center mt-4">Tout est à jour !</p>}
-                        {mesTaches.filter(t => t.statut === 'A_FAIRE').map(t => (
-                            <div key={t.id_tache} className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-orange-500/30 transition">
-                                <div className="flex justify-between"><p className="text-white font-bold text-xs">{t.titre}</p>{t.projet && <span className="text-[9px] bg-blue-500/10 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/20">{t.projet.nom_projet}</span>}</div>
-                                <p className="text-[10px] text-gray-500 mt-1">De : {t.assigne_par.prenom}</p>
-                                <div className="flex gap-2 mt-2">
-                                    <button onClick={() => handlePlanTask(t)} className="flex-1 text-[10px] bg-blue-600/10 text-blue-400 py-1 rounded hover:bg-blue-600/20 border border-blue-500/20">Planifier</button>
-                                    <button onClick={() => handleFinishTask(t.id_tache)} className="flex-1 text-[10px] bg-green-600/10 text-green-400 py-1 rounded hover:bg-green-600/20 border border-green-500/20">Fait</button>
-                                </div>
-                            </div>
-                        ))}
+                        {mesTaches.filter(t => t.statut === 'A_FAIRE').map(t => (<div key={t.id_tache} className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-orange-500/30 transition"><div className="flex justify-between"><p className="text-white font-bold text-xs">{t.titre}</p>{t.projet && <span className="text-[9px] bg-blue-500/10 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/20">{t.projet.nom_projet}</span>}</div><p className="text-[10px] text-gray-500 mt-1">De : {t.assigne_par.prenom}</p><div className="flex gap-2 mt-2"><button onClick={() => handlePlanTask(t)} className="flex-1 text-[10px] bg-blue-600/10 text-blue-400 py-1 rounded hover:bg-blue-600/20 border border-blue-500/20">Planifier</button><button onClick={() => handleFinishTask(t.id_tache)} className="flex-1 text-[10px] bg-green-600/10 text-green-400 py-1 rounded hover:bg-green-600/20 border border-green-500/20">Fait</button></div></div>))}
                     </div>
                 </div>
-
-                <button onClick={() => setShowModalProjets(true)} className="glass-panel p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition group w-full text-left">
-                    <span className="text-sm font-bold text-gray-300 group-hover:text-white">Voir mes Projets</span>
-                    <FolderOpen className="w-5 h-5 text-gray-500 group-hover:text-blue-400 transition"/>
-                </button>
+                <button onClick={() => setShowModalProjets(true)} className="glass-panel p-4 rounded-xl flex items-center justify-between hover:bg-white/5 transition group w-full text-left"><span className="text-sm font-bold text-gray-300 group-hover:text-white">Voir mes Projets</span><FolderOpen className="w-5 h-5 text-gray-500 group-hover:text-blue-400 transition"/></button>
             </div>
 
-            {/* CALENDRIER */}
             <div className="flex-1 glass-panel p-1 rounded-2xl shadow-2xl border border-white/10 overflow-hidden relative">
                  <div className="absolute inset-0 bg-gradient-to-b from-[#0f172a] via-[#0f172a] to-blue-900/10 pointer-events-none"></div>
                  <div className="relative h-full">
@@ -494,57 +338,29 @@ export default function EmployeDashboard() {
             </div>
         </div>
 
-        {/* --- MODALE CONGÉS --- */}
+        {/* MODALE CONGÉS */}
         {showModalConges && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
                 <div className="glass-panel w-full max-w-lg p-8 rounded-2xl border border-pink-500/30 bg-[#0f172a] relative shadow-2xl">
                     <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><Sun className="w-6 h-6 text-pink-500"/> Gestion des Congés</h2>
-                    
                     <div className="grid grid-cols-2 gap-6 mb-6">
-                        <div className="p-4 bg-white/5 rounded-xl border border-white/5">
-                            <p className="text-xs text-gray-400 uppercase font-bold">En attente</p>
-                            <p className="text-2xl font-bold text-white">{mesConges.filter((c:any) => c.statut === 'EN_ATTENTE').length}</p>
-                        </div>
-                        <div className="p-4 bg-white/5 rounded-xl border border-white/5">
-                            <p className="text-xs text-gray-400 uppercase font-bold">Validés</p>
-                            <p className="text-2xl font-bold text-green-400">{mesConges.filter((c:any) => c.statut === 'VALIDE').length}</p>
-                        </div>
+                        <div className="p-4 bg-white/5 rounded-xl border border-white/5"><p className="text-xs text-gray-400 uppercase font-bold">En attente</p><p className="text-2xl font-bold text-white">{mesConges.filter((c:any) => c.statut === 'EN_ATTENTE').length}</p></div>
+                        <div className="p-4 bg-white/5 rounded-xl border border-white/5"><p className="text-xs text-gray-400 uppercase font-bold">Validés</p><p className="text-2xl font-bold text-green-400">{mesConges.filter((c:any) => c.statut === 'VALIDE').length}</p></div>
                     </div>
-
                     <form onSubmit={handleRequestConge} className="space-y-4">
                         <div className="grid grid-cols-2 gap-4">
                             <div><label className="text-xs font-bold text-gray-500">Du</label><input type="date" required className="glass-input w-full [color-scheme:dark]" value={congeForm.date_debut} onChange={e => setCongeForm({...congeForm, date_debut: e.target.value})} /></div>
                             <div><label className="text-xs font-bold text-gray-500">Au</label><input type="date" required className="glass-input w-full [color-scheme:dark]" value={congeForm.date_fin} onChange={e => setCongeForm({...congeForm, date_fin: e.target.value})} /></div>
                         </div>
-                        <div>
-                            <label className="text-xs font-bold text-gray-500">Type</label>
-                            <select className="glass-input w-full bg-[#0f172a]" value={congeForm.type} onChange={e => setCongeForm({...congeForm, type: e.target.value})}>
-                                <option value="VACANCES">Vacances</option>
-                                <option value="MALADIE">Arrêt Maladie</option>
-                                <option value="RTT">RTT</option>
-                                <option value="SANS_SOLDE">Sans Solde</option>
-                            </select>
-                        </div>
+                        <div><label className="text-xs font-bold text-gray-500">Type</label><select className="glass-input w-full bg-[#0f172a]" value={congeForm.type} onChange={e => setCongeForm({...congeForm, type: e.target.value})}><option value="VACANCES">Vacances</option><option value="MALADIE">Arrêt Maladie</option><option value="RTT">RTT</option><option value="SANS_SOLDE">Sans Solde</option></select></div>
                         <button type="submit" className="w-full btn-neon-pink py-3 rounded-xl font-bold text-white mt-2">Envoyer la demande</button>
                     </form>
-
-                    <div className="mt-6 border-t border-white/10 pt-4">
-                        <p className="text-xs font-bold text-gray-500 mb-3 uppercase">Historique récent</p>
-                        <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
-                            {mesConges.map((c:any) => (
-                                <div key={c.id_conge} className="flex justify-between items-center text-xs p-2 rounded bg-white/5">
-                                    <span className="text-gray-300">{c.type} ({new Date(c.date_debut).toLocaleDateString()})</span>
-                                    <span className={`font-bold ${c.statut === 'VALIDE' ? 'text-green-400' : c.statut === 'REFUSE' ? 'text-red-400' : 'text-yellow-400'}`}>{c.statut}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
                     <button onClick={() => setShowModalConges(false)} className="absolute top-4 right-4 text-gray-400"><X/></button>
                 </div>
             </div>
         )}
 
-        {/* MODALE EVENT AVEC CORRECTION DATE */}
+        {/* MODALE EVENT */}
         {showModalEvent && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
                 <div className="glass-panel w-full max-w-md p-8 rounded-2xl border border-white/10 bg-[#0f172a] shadow-2xl relative">
@@ -552,40 +368,25 @@ export default function EmployeDashboard() {
                      <Container onSubmit={editMode ? handleUpdate : undefined} className="space-y-5">
                         <div><label className="text-gray-500 text-xs font-bold uppercase">Objet</label>{editMode ? <input className="glass-input w-full" value={formData.objet} onChange={e => setFormData({...formData, objet: e.target.value})} /> : <p className="text-white font-bold">{displayEvent.title}</p>}</div>
                         
-                        {/* ✅ INPUTS DE DATE CORRIGÉS AVEC [color-scheme:dark] */}
+                        {/* 🛑 INPUTS DATE AVEC RESTRICTION MIN={minDate} */}
                         <div className="grid grid-cols-2 gap-4">
-                             <div>
-                                 <label className="text-gray-500 text-xs font-bold">Début</label>
-                                 {editMode ? 
-                                    <input 
-                                        type="datetime-local" 
-                                        className="glass-input w-full text-xs [color-scheme:white]" // 🔥 FIX ICI
-                                        value={formData.start} 
-                                        onChange={e => setFormData({...formData, start: e.target.value})}
-                                    /> 
-                                    : <p className="text-gray-300 text-sm">{new Date(displayEvent.start).toLocaleString()}</p>
-                                 }
-                             </div>
-                             <div>
-                                 <label className="text-gray-500 text-xs font-bold">Fin</label>
-                                 {editMode ? 
-                                    <input 
-                                        type="datetime-local" 
-                                        className="glass-input w-full text-xs [color-scheme:dark]" // 🔥 FIX ICI
-                                        value={formData.end} 
-                                        onChange={e => setFormData({...formData, end: e.target.value})}
-                                    /> 
-                                    : <p className="text-gray-300 text-sm">{new Date(displayEvent.end).toLocaleString()}</p>
-                                 }
-                             </div>
+                             <div><label className="text-gray-500 text-xs font-bold">Début</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs [color-scheme:dark]" min={minDate} value={formData.start} onChange={e => setFormData({...formData, start: e.target.value})}/> : <p className="text-gray-300 text-sm">{new Date(displayEvent.start).toLocaleString()}</p>}</div>
+                             <div><label className="text-gray-500 text-xs font-bold">Fin</label>{editMode ? <input type="datetime-local" className="glass-input w-full text-xs [color-scheme:dark]" min={minDate} value={formData.end} onChange={e => setFormData({...formData, end: e.target.value})}/> : <p className="text-gray-300 text-sm">{new Date(displayEvent.end).toLocaleString()}</p>}</div>
                         </div>
 
-                        {editMode && (
+                        {editMode ? (
                             <div className="grid grid-cols-2 gap-4">
-                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Salle</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_salle} onChange={e => setFormData({...formData, id_salle: e.target.value, id_ressource: ""})}><option value="">Aucune</option>{allSalles.map(s => { const isDispo = dispoSalles.some((ds: any) => ds.id_salle === s.id_salle) || s.id_salle === formData.id_salle; return <option key={s.id_salle} value={s.id_salle} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{s.nom_salle} {!isDispo ? "(Occupé)" : ""}</option>})}</select></div>
-                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Matériel</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_ressource} onChange={e => setFormData({...formData, id_ressource: e.target.value, id_salle: ""})}><option value="">Aucun</option>{allRessources.map(r => { const isDispo = dispoRessources.some((dr: any) => dr.id_ressource === r.id_ressource) || r.id_ressource === formData.id_ressource; return <option key={r.id_ressource} value={r.id_ressource} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{r.nom_ressource} {!isDispo ? "(Pris)" : ""}</option>})}</select></div>
+                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Salle</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_salle} onChange={e => setFormData({...formData, id_salle: e.target.value})}><option value="">Aucune</option>{allSalles.map(s => { const isDispo = dispoSalles.some((ds: any) => ds.id_salle === s.id_salle) || s.id_salle === formData.id_salle; return <option key={s.id_salle} value={s.id_salle} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{s.nom_salle} {!isDispo ? "(Occupé)" : ""}</option>})}</select></div>
+                                <div><label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Matériel</label><select className="glass-input bg-[#0f172a] w-full text-xs" value={formData.id_ressource} onChange={e => setFormData({...formData, id_ressource: e.target.value})}><option value="">Aucun</option>{allRessources.map(r => { const isDispo = dispoRessources.some((dr: any) => dr.id_ressource === r.id_ressource) || r.id_ressource === formData.id_ressource; return <option key={r.id_ressource} value={r.id_ressource} disabled={!isDispo} className={!isDispo ? "text-red-500" : ""}>{r.nom_ressource} {!isDispo ? "(Pris)" : ""}</option>})}</select></div>
+                            </div>
+                        ) : (
+                            <div className="space-y-1">
+                                {displayEvent.nom_salle && <p className="text-xs text-blue-300 flex items-center gap-2"><MapPin className="w-3 h-3"/> Salle : {displayEvent.nom_salle}</p>}
+                                {displayEvent.nom_ressource && <p className="text-xs text-orange-300 flex items-center gap-2"><Box className="w-3 h-3"/> Matériel : {displayEvent.nom_ressource}</p>}
+                                {!displayEvent.nom_salle && !displayEvent.nom_ressource && <p className="text-xs text-gray-500 italic">Aucune ressource associée.</p>}
                             </div>
                         )}
+
                         {editMode && checkingDispo && <p className="text-[10px] text-blue-400 animate-pulse text-center">Vérification disponibilités...</p>}
 
                         <div className="flex gap-3 pt-4 border-t border-white/10">
@@ -605,7 +406,6 @@ export default function EmployeDashboard() {
             </div>
         )}
 
-        {/* AUTRES MODALES RESTENT INCHANGÉES */}
         {showModalProjets && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowModalProjets(false)}>
                 <div className="glass-panel w-full max-w-2xl p-8 rounded-2xl border border-white/10 bg-[#0f172a] relative" onClick={e => e.stopPropagation()}>
