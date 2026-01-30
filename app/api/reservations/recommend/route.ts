@@ -24,16 +24,13 @@ export async function POST(req: Request) {
         const usageCount = await prisma.aiLog.count({
             where: { id_employe: userId, createdAt: { gte: tenMinutesAgo } }
         });
-        if (usageCount >= 5) return NextResponse.json({ error: "Quota dépassé (Pause café ? ☕)." }, { status: 429 });
+        if (usageCount >= 10) return NextResponse.json({ error: "Le cerveau surchauffe (Quota dépassé ☕)." }, { status: 429 });
     }
 
-    // 2. RÉCUPÉRATION DATA CONTEXTUELLE
-    
-    // A. Salles & Ressources
+    // 2. RÉCUPÉRATION DATA
     const salles = await prisma.salle.findMany();
     const ressources = await prisma.ressource.findMany({ where: { etat: "DISPONIBLE" } });
     
-    // B. Projets & Tâches
     const participations = await prisma.participationProjet.findMany({
         where: { id_employe: userId }, include: { projet: true }
     });
@@ -43,16 +40,12 @@ export async function POST(req: Request) {
         where: { id_assigne_a: userId, statut: "A_FAIRE" }
     });
 
-    // C. INDISPONIBILITÉS (Congés + Réservations Salles)
-    // On regarde sur les 30 prochains jours pour limiter la charge
+    // Indisponibilités
     const dateLimite = new Date();
-    dateLimite.setDate(dateLimite.getDate() + 30);
-
+    dateLimite.setDate(dateLimite.getDate() + 45);
     const conges = await prisma.conge.findMany({
         where: { id_employe: userId, statut: "VALIDE", date_fin: { gte: new Date() } }
     });
-
-    // 🔥 LE FIX EST ICI : On récupère l'occupation des salles
     const occupations = await prisma.reservationSalle.findMany({
         where: { 
             date_debut: { gte: new Date(), lte: dateLimite },
@@ -62,102 +55,106 @@ export async function POST(req: Request) {
         select: { date_debut: true, date_fin: true, salle: { select: { nom_salle: true } } }
     });
 
-    // 3. PRÉPARATION DU CONTEXTE TEXTUEL
+    // 3. CONTEXTE TEXTUEL
     const contextDate = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     
-    const txtSalles = salles.map(s => s.nom_salle).join(", ");
+    const txtSalles = salles.map(s => 
+        `- ${s.nom_salle} (Capacité: ${s.capacite}p, Équipements INCLUS: [${s.equipements || "Aucun"}])`
+    ).join("\n");
+
     const txtRessources = ressources.map(r => r.nom_ressource).join(", ");
     const txtProjets = projetsUser.map(p => p.nom_projet).join(", ");
     const txtTaches = taches.map(t => t.titre).join(", ");
-    
-    const txtConges = conges.map(c => `Absent du ${new Date(c.date_debut).toLocaleDateString()} au ${new Date(c.date_fin).toLocaleDateString()}`).join("\n");
-    
-    // On formatte les occupations pour que l'IA comprenne les créneaux pris
-    const txtOccupations = occupations.map(o => 
-        `⛔ ${o.salle?.nom_salle} est prise le ${new Date(o.date_debut).toLocaleDateString()} de ${new Date(o.date_debut).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} à ${new Date(o.date_fin).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`
-    ).join("\n");
+    const txtConges = conges.map(c => `ABSENT du ${new Date(c.date_debut).toLocaleDateString()} au ${new Date(c.date_fin).toLocaleDateString()}`).join("\n");
+    const txtOccupations = occupations.map(o => `[PRIS] ${o.salle?.nom_salle} : ${new Date(o.date_debut).toLocaleTimeString()}-${new Date(o.date_fin).toLocaleTimeString()}`).join("\n");
 
-    // Sauvegarde Log
     await prisma.aiLog.create({ data: { id_employe: userId, prompt: objet } });
 
-    // 4. PROMPT SYSTÈME INTELLIGENT (Avec Occupations)
+    // 4. LE SUPER-PROMPT AMÉLIORÉ
     const systemPrompt = `
-        Tu es un assistant expert en planification pour NexusPharm.
-        DATE ACTUELLE : ${contextDate}. Année 2026 forcée.
+        Tu es NexusAI.
+        DATE : ${contextDate}. Année 2026.
 
-        === LISTES DE RÉFÉRENCE ===
-        SALLES EXISTANTES : [${txtSalles}]
-        MATÉRIEL DISPO : [${txtRessources}]
-        PROJETS DU USER : [${txtProjets}]
-        TÂCHES DU USER : [${txtTaches}]
-        
-        === CONTRAINTES DE TEMPS (IMPORTANT) ===
-        TES CONGÉS (INTERDIT DE RÉSERVER) : 
-        ${txtConges || "Aucun congé prévu."}
+        === INVENTAIRE ===
+        SALLES (et ce qu'elles contiennent DÉJÀ) :
+        ${txtSalles}
 
-        SALLES DÉJÀ OCCUPÉES (CRÉNEAUX INTERDITS) :
-        ${txtOccupations || "Aucune réservation gênante pour l'instant."}
-        ==========================
+        MATÉRIEL MOBILE (à ajouter SI MANQUANT) :
+        [${txtRessources}]
 
-        DEMANDE UTILISATEUR : "${objet}"
+        === CONTEXTE ===
+        PROJETS: [${txtProjets}]
+        TÂCHES: [${txtTaches}]
+        CONGÉS: ${txtConges}
+        OCCUPATIONS: ${txtOccupations}
 
-        INSTRUCTIONS STRICTES :
-        1. Analyse la demande (Dates, Pax, Projet, Tâche).
-        2. VÉRIFIE LES CONFLITS :
-           - Si l'utilisateur demande une date où il est en congé -> Renvoie "error": "Vous êtes en congé ce jour-là !".
-           - Si la salle demandée est listée comme "prise" dans SALLES DÉJÀ OCCUPÉES sur ce créneau -> Trouve un autre créneau libre proche ou une autre salle libre.
-        3. SALLE/MATÉRIEL : Trouve le nom exact dans les listes.
-        4. TÂCHE : Si c'est pour travailler sur une tâche, utilise son titre.
+        DEMANDE : "${objet}"
 
-        JSON STRICT ATTENDU (Sans texte avant/après) :
+        === LOGIQUE DE DÉCISION STRICTE ===
+        1. **CHOIX SALLE** : Trouve une salle libre adaptée à la capacité.
+        2. **ANALYSE ÉQUIPEMENT (CRITIQUE)** :
+           - L'utilisateur demande-t-il un équipement ? (ex: "écran", "projecteur", "visio").
+           - REGARDE la salle choisie : Contient-elle cet équipement dans "Équipements INCLUS" ?
+           - CAS A : OUI, elle l'a -> Ne réserve RIEN en matériel mobile.
+           - CAS B : NON, elle ne l'a pas -> TU DOIS OBLIGATOIREMENT piocher dans "MATÉRIEL MOBILE" un objet correspondant et le mettre dans 'nom_materiel_exact'.
+        3. **PROJET** : Associe au projet le plus pertinent par rapport aux mots clés.
+
+        JSON STRICT :
         {
-            "analysis": "Explique ton choix (ex: 'Salle A prise, j'ai mis Salle B')",
+            "analysis": "Explique pourquoi tu as ajouté (ou non) du matériel mobile.",
             "suggested_title": "Titre",
             "detected_pax": 1,
-            "suggested_start": "ISO 8601 (YYYY-MM-DDTHH:mm:00)",
+            "suggested_start": "ISO 8601",
             "suggested_end": "ISO 8601",
             "nom_salle_exact": "Nom précis ou null",
             "nom_materiel_exact": "Nom précis ou null",
             "nom_projet_exact": "Nom précis ou null",
-            "error": "Message d'erreur bloquant (congé) ou null"
+            "error": "Message erreur ou null"
         }
     `;
 
-    // 5. APPEL CLAUDE (ANTHROPIC)
+    // 5. APPEL IA
     const msg = await anthropic.messages.create({
         model: "claude-3-haiku-20240307",
-        max_tokens: 1000,
+        max_tokens: 1500,
         system: systemPrompt,
         messages: [{ role: "user", content: objet }]
     });
 
     const textResponse = msg.content[0].type === 'text' ? msg.content[0].text : "{}";
-    
-    // Nettoyage JSON
     const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
     const ai = JSON.parse(jsonMatch ? jsonMatch[0] : "{}");
 
-    if (ai.error) {
-        return NextResponse.json({ error: ai.error, analysis: ai.analysis });
-    }
+    if (ai.error) return NextResponse.json({ error: ai.error, analysis: ai.analysis });
 
-    // 6. MATCHING INTELLIGENT
+    // 6. MATCHING ROBUSTE (Flou)
+    
+    // --- SALLE ---
     let foundRoom = null;
     if (ai.nom_salle_exact) {
         const target = ai.nom_salle_exact.toLowerCase().trim();
-        foundRoom = salles.find(s => s.nom_salle.toLowerCase().includes(target));
+        foundRoom = salles.find(s => s.nom_salle.toLowerCase().includes(target) || target.includes(s.nom_salle.toLowerCase()));
     }
 
+    // --- MATÉRIEL (Amélioré) ---
     let foundEquipment = null;
     if (ai.nom_materiel_exact) {
         const target = ai.nom_materiel_exact.toLowerCase().trim();
-        foundEquipment = ressources.find(r => r.nom_ressource.toLowerCase().includes(target));
+        foundEquipment = ressources.find(r => {
+            const dbName = r.nom_ressource.toLowerCase();
+            // Matching plus souple : "Ecran" matche "Ecran Mobile"
+            return dbName.includes(target) || target.includes(dbName) || dbName.split(' ').some(w => target.includes(w) && w.length > 3);
+        });
     }
 
+    // --- PROJET (Amélioré) ---
     let foundProject = null;
     if (ai.nom_projet_exact) {
         const target = ai.nom_projet_exact.toLowerCase().trim();
-        foundProject = projetsUser.find(p => p.nom_projet.toLowerCase().includes(target));
+        foundProject = projetsUser.find(p => {
+            const dbName = p.nom_projet.toLowerCase();
+            return dbName.includes(target) || target.includes(dbName) || dbName.split(' ').some(w => target.includes(w) && w.length > 3);
+        });
     }
 
     return NextResponse.json({
@@ -172,6 +169,6 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error("Erreur IA:", error);
-    return NextResponse.json({ error: "L'assistant réfléchit trop fort... Réessayez." }, { status: 500 });
+    return NextResponse.json({ error: "Erreur IA." }, { status: 500 });
   }
 }

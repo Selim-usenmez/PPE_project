@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+// 👇 AJOUT DES ICÔNES Info et Monitor
 import { 
   CalendarRange, ArrowLeft, Search, Sparkles, CheckCircle2, 
-  CalendarCheck, Lock, Save, Loader2, Lightbulb 
+  CalendarCheck, Lock, Save, Loader2, Lightbulb, Info, Monitor, X
 } from "lucide-react";
 
-// Fonction de formatage
 const formatForInput = (d: string | Date) => {
     try {
         const date = new Date(d);
@@ -30,13 +30,15 @@ export default function EmployeReservationsPage() {
   const [advice, setAdvice] = useState<any>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [occupied, setOccupied] = useState<{ rooms: string[], resources: string[] }>({ rooms: [], resources: [] });
+  
+  // 👇 NOUVEL ÉTAT POUR AFFICHER LES DÉTAILS
+  const [showRoomDetails, setShowRoomDetails] = useState(false);
 
   const [aiUsageCount, setAiUsageCount] = useState(0);
   const [quotaResetTime, setQuotaResetTime] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState("");
 
   const [form, setForm] = useState({ id_salle: "", id_ressource: "", id_projet: "", date_debut: "", date_fin: "", objet: "" });
-
   const [minDate, setMinDate] = useState("");
 
   useEffect(() => {
@@ -45,7 +47,6 @@ export default function EmployeReservationsPage() {
       if (!stored) { router.push("/login"); return; }
       const currentUser = JSON.parse(stored);
       setUser(currentUser);
-
       const now = new Date();
       setMinDate(formatForInput(now));
 
@@ -59,14 +60,13 @@ export default function EmployeReservationsPage() {
       try {
         const [resSalles, resRessources, resProjets] = await Promise.all([
             fetch("/api/salles").then(r => r.json()),
-            fetch("/api/ressources").then(r => r.json()), // On récupère TOUT (pour afficher les HS grisés)
+            fetch("/api/ressources").then(r => r.json()),
             fetch(`/api/employes/${currentUser.id_employe}/projets`).then(r => r.json()),
         ]);
         setSalles(resSalles); setRessources(resRessources); setMesProjets(Array.isArray(resProjets) ? resProjets : []);
         
         const end = new Date(now); end.setHours(end.getHours() + 1);
         setForm(f => ({ ...f, date_debut: formatForInput(now), date_fin: formatForInput(end) }));
-        
         if (Array.isArray(resProjets) && resProjets.length > 0) setForm(f => ({ ...f, id_projet: resProjets[0].id_projet }));
       } catch (e) { toast.error("Erreur chargement"); } 
       finally { setLoading(false); }
@@ -96,6 +96,9 @@ export default function EmployeReservationsPage() {
     const timer = setTimeout(checkAvailability, 500);
     return () => clearTimeout(timer);
   }, [form.date_debut, form.date_fin]);
+
+  // Récupération des données de la salle sélectionnée
+  const selectedSalleData = salles.find(s => s.id_salle === form.id_salle);
 
   const handleAnalyzeAI = async () => {
     if (!form.objet || form.objet.length < 5) return toast.warning("Décrivez d'abord votre besoin.");
@@ -149,11 +152,7 @@ export default function EmployeReservationsPage() {
             toast.success("Réservation validée !"); 
             router.push("/employe/dashboard"); 
         } 
-        else { 
-            const err = await res.json(); 
-            // 🛑 GESTION ERREUR MAINTENANCE DU BACKEND
-            toast.error(err.error || "Erreur lors de la réservation"); 
-        }
+        else { const err = await res.json(); toast.error(err.error || "Erreur lors de la réservation"); }
     } catch (e) { toast.error("Erreur serveur"); }
   };
 
@@ -189,33 +188,66 @@ export default function EmployeReservationsPage() {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Projet</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_projet} onChange={e => setForm({...form, id_projet: e.target.value})}><option value="">-- Sélectionner --</option>{mesProjets.map(p => <option key={p.id_projet} value={p.id_projet}>{p.nom_projet}</option>)}</select></div>
-                            <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block flex justify-between">Salle {checking && <span className="text-blue-400 text-[9px] animate-pulse">Vérif...</span>}</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_salle} onChange={e => setForm({...form, id_salle: e.target.value})}><option value="">-- Aucune --</option>{salles.map(s => { const isTaken = occupied.rooms.includes(s.id_salle); return <option key={s.id_salle} value={s.id_salle} disabled={isTaken} className={isTaken ? "bg-red-900/20 text-gray-500" : "text-white"}>{s.nom_salle} {isTaken ? "🔴" : `(${s.capacite}p)`}</option> })}</select></div>
+                            
+                            {/* 👇 SÉLECTION SALLE AVEC BOUTON D'INFO */}
+                            <div className="relative">
+                                <div className="flex justify-between items-center mb-1">
+                                    <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-2">
+                                        Salle {checking && <span className="text-blue-400 text-[9px] animate-pulse">Vérif...</span>}
+                                    </label>
+                                    
+                                    {/* BOUTON AFFICHAGE ÉQUIPEMENT */}
+                                    {selectedSalleData && (
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setShowRoomDetails(!showRoomDetails)}
+                                            className="text-[10px] flex items-center gap-1 text-blue-400 hover:text-blue-300 transition bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20"
+                                        >
+                                            <Monitor className="w-3 h-3"/> {showRoomDetails ? "Masquer" : "Voir équipement"}
+                                        </button>
+                                    )}
+                                </div>
+                                
+                                <select className="glass-input w-full bg-[#0f172a]" value={form.id_salle} onChange={e => { setForm({...form, id_salle: e.target.value}); setShowRoomDetails(true); }}>
+                                    <option value="">-- Aucune --</option>
+                                    {salles.map(s => { 
+                                        const isTaken = occupied.rooms.includes(s.id_salle); 
+                                        return <option key={s.id_salle} value={s.id_salle} disabled={isTaken} className={isTaken ? "bg-red-900/20 text-gray-500" : "text-white"}>{s.nom_salle} {isTaken ? "🔴" : `(${s.capacite}p)`}</option> 
+                                    })}
+                                </select>
+
+                                {/* 👇 LA BOITE D'INFO QUI S'AFFICHE */}
+                                {showRoomDetails && selectedSalleData && (
+                                    <div className="absolute top-full left-0 right-0 mt-2 z-10 bg-[#0f172a] border border-blue-500/30 rounded-xl p-4 shadow-2xl animate-in slide-in-from-top-2">
+                                        <div className="flex items-start gap-3">
+                                            <div className="p-2 bg-blue-500/20 rounded-lg"><Info className="w-5 h-5 text-blue-400"/></div>
+                                            <div>
+                                                <p className="font-bold text-white text-sm">{selectedSalleData.nom_salle}</p>
+                                                <p className="text-xs text-gray-400 mt-1">Équipements inclus :</p>
+                                                <div className="flex flex-wrap gap-2 mt-2">
+                                                    {selectedSalleData.equipements ? (
+                                                        selectedSalleData.equipements.split(',').map((eq: string, i: number) => (
+                                                            <span key={i} className="text-[10px] bg-white/10 px-2 py-1 rounded text-gray-200 border border-white/5">{eq.trim()}</span>
+                                                        ))
+                                                    ) : <span className="text-xs text-gray-500 italic">Aucun équipement déclaré</span>}
+                                                </div>
+                                            </div>
+                                            <button type="button" onClick={() => setShowRoomDetails(false)} className="ml-auto text-gray-500 hover:text-white"><X className="w-4 h-4"/></button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                        
-                        {/* 🛑 MODIFICATION ICI : MATÉRIEL GRISÉ SI MAINTENANCE */}
+
                         <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Matériel</label>
-                            <select 
-                                className="glass-input w-full bg-[#0f172a]" 
-                                value={form.id_ressource} 
-                                onChange={e => setForm({...form, id_ressource: e.target.value})}
-                            >
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Matériel Mobile</label>
+                            <select className="glass-input w-full bg-[#0f172a]" value={form.id_ressource} onChange={e => setForm({...form, id_ressource: e.target.value})}>
                                 <option value="">-- Aucun --</option>
                                 {ressources.map(r => { 
                                     const isBroken = r.etat === "EN_MAINTENANCE" || r.etat === "HORS_SERVICE";
                                     const isTaken = occupied.resources.includes(r.id_ressource);
                                     const isDisabled = isBroken || isTaken;
-
-                                    return (
-                                        <option 
-                                            key={r.id_ressource} 
-                                            value={r.id_ressource} 
-                                            disabled={isDisabled} 
-                                            className={isDisabled ? "bg-red-900/20 text-gray-500" : "text-white"}
-                                        >
-                                            {isBroken ? `🔴 ${r.nom_ressource} (HS)` : isTaken ? `🟠 ${r.nom_ressource} (Occupé)` : r.nom_ressource}
-                                        </option>
-                                    );
+                                    return <option key={r.id_ressource} value={r.id_ressource} disabled={isDisabled} className={isDisabled ? "bg-red-900/20 text-gray-500" : "text-white"}>{isBroken ? `🔴 ${r.nom_ressource} (HS)` : isTaken ? `🟠 ${r.nom_ressource} (Occupé)` : r.nom_ressource}</option> 
                                 })}
                             </select>
                         </div>
@@ -236,7 +268,7 @@ export default function EmployeReservationsPage() {
                             <div className="bg-white/5 rounded-xl p-4 border border-white/10 space-y-3">
                                 {advice.newDates ? (<div className="flex items-center gap-3 text-blue-300"><CalendarCheck className="w-5 h-5 shrink-0" /><div><div className="text-[10px] uppercase font-bold text-gray-500">Créneau</div><div className="text-sm font-bold">{new Date(advice.newDates.start).toLocaleDateString()}</div><div className="text-xs">{new Date(advice.newDates.start).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} - {new Date(advice.newDates.end).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div></div></div>) : <div className="text-xs text-gray-500">Dates inchangées</div>}
                                 <div className="h-px bg-white/10"></div>
-                                {advice.room ? (<div className="flex items-center gap-3 text-green-300"><CheckCircle2 className="w-5 h-5 shrink-0" /><div><div className="text-[10px] uppercase font-bold text-gray-500">Salle</div><div className="text-sm font-bold">{advice.room.nom_salle}</div><div className="text-[10px] text-gray-400 flex items-center gap-2">Max: {advice.room.capacite}p {advice.pax && <span className="bg-white/10 px-1.5 rounded text-white">Besoin: {advice.pax}</span>}</div></div></div>) : <div className="text-xs text-red-400 flex gap-2"><Lock className="w-3 h-3"/> Pas de salle dispo</div>}
+                                {advice.room ? (<div className="flex items-center gap-3 text-green-300"><CheckCircle2 className="w-5 h-5 shrink-0" /><div><div className="text-[10px] uppercase font-bold text-gray-500">Salle</div><div className="text-sm font-bold">{advice.room.nom_salle}</div><div className="text-[10px] text-gray-400 flex items-center gap-2">Max: {advice.room.capacite}p</div></div></div>) : <div className="text-xs text-red-400 flex gap-2"><Lock className="w-3 h-3"/> Pas de salle dispo</div>}
                                 {advice.suggestedEquipment && (<div className="flex items-center gap-3 text-yellow-300 mt-2"><Lightbulb className="w-5 h-5 shrink-0" /><div><div className="text-[10px] uppercase font-bold text-gray-500">Ajout Matériel</div><div className="text-sm font-bold">{advice.suggestedEquipment.nom_ressource}</div></div></div>)}
                             </div>
                         </div>
