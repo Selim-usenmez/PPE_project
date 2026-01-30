@@ -5,11 +5,11 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { canManageEmployees } from "@/lib/permissions";
-// 👇 IMPORTS LUCIDE (J'ai ajouté "Eye" pour le bouton vue employé)
+// 👇 IMPORTS LUCIDE (J'ai ajouté "Archive")
 import { 
   LayoutDashboard, Users, DoorOpen, CalendarRange, 
   Briefcase, Box, AlertTriangle, ScrollText, LogOut, 
-  KeyRound, Eye 
+  KeyRound, Eye, Archive 
 } from "lucide-react";
 
 export default function AdminSidebar() {
@@ -42,6 +42,8 @@ export default function AdminSidebar() {
     { name: "Ressources", path: "/admin/ressources", icon: Box, access: true },
     { name: "Incidents", path: "/admin/incidents", icon: AlertTriangle, access: true },
     { name: "Historique", path: "/admin/historique", icon: ScrollText, access: role === "ADMIN" },
+    // 👇 NOUVEAU LIEN ARCHIVES (ADMIN ONLY)
+    { name: "Archives", path: "/admin/archives", icon: Archive, access: role === "ADMIN" },
   ];
 
   return (
@@ -50,7 +52,6 @@ export default function AdminSidebar() {
       {/* HEADER AVEC LOGO */}
       <div className="p-6 border-b border-white/10 flex items-center gap-3">
         <div className="relative h-10 w-10 flex-shrink-0">
-           {/* Assure-toi que logo.png est bien dans le dossier public/ */}
            <Image 
              src="/logo.png" 
              alt="NexusPharm Logo" 
@@ -105,7 +106,7 @@ export default function AdminSidebar() {
       {/* FOOTER (Switch View + User Info + Logout) */}
       <div className="p-4 border-t border-white/10 bg-black/20">
         
-        {/* 👇 BOUTON SWITCH VUE EMPLOYÉ */}
+        {/* BOUTON SWITCH VUE EMPLOYÉ */}
         <Link 
             href="/employe/dashboard"
             className="w-full flex items-center justify-center gap-2 mb-4 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white py-2.5 rounded-xl text-sm font-bold transition-all group"

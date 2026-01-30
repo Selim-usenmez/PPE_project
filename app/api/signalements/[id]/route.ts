@@ -2,18 +2,14 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createLog } from "@/lib/logger";
 
-type Props = {
-  params: Promise<{ id: string }>;
-};
+type Props = { params: Promise<{ id: string }> };
 
-// PUT : Mettre à jour le signalement (Résoudre ou Maintenance)
 export async function PUT(req: Request, { params }: Props) {
   try {
-    const { id } = await params; // ID du signalement
+    const { id } = await params;
     const body = await req.json();
-    const { action } = body; // "RESOLUDRE" ou "MAINTENANCE"
+    const { action, commentaire_tech, message_reponse } = body; // 👈 Récupération des messages
 
-    // 1. Récupérer le signalement pour avoir l'ID de la ressource
     const signalement = await prisma.signalement.findUnique({
       where: { id_signalement: id },
       include: { ressource: true }
@@ -21,26 +17,33 @@ export async function PUT(req: Request, { params }: Props) {
 
     if (!signalement) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
 
+    // Données communes à mettre à jour
+    const updateData = {
+        commentaire_tech: commentaire_tech || null,
+        message_reponse: message_reponse || null,
+        statut: action === "MAINTENANCE" ? "EN_COURS" : "RESOLU"
+    };
+
+    // 1. Mise à jour du Signalement
+    await prisma.signalement.update({
+        where: { id_signalement: id },
+        data: updateData
+    });
+
+    // 2. Mise à jour de la Ressource + Logs
     if (action === "MAINTENANCE") {
-      // Action : On passe la ressource en panne
       await prisma.ressource.update({
         where: { id_ressource: signalement.id_ressource },
         data: { etat: "EN_MAINTENANCE" }
       });
-      await createLog("MAINTENANCE", `Ressource ${signalement.ressource.nom_ressource} passée en maintenance suite incident.`);
+      await createLog("MAINTENANCE", `Maintenance : ${signalement.ressource.nom_ressource}. Note: ${commentaire_tech}`);
     } 
     else if (action === "RESOUDRE") {
-      // Action : On clôture l'incident + On remet la ressource en disponible
-      await prisma.signalement.update({
-        where: { id_signalement: id },
-        data: { statut: "RESOLU" }
-      });
-      // Optionnel : remettre la ressource en dispo si elle était en maintenance
       await prisma.ressource.update({
         where: { id_ressource: signalement.id_ressource },
         data: { etat: "DISPONIBLE" }
       });
-      await createLog("INCIDENT_RESOLU", `Incident clos pour ${signalement.ressource.nom_ressource}`);
+      await createLog("INCIDENT_RESOLU", `Résolu : ${signalement.ressource.nom_ressource}. Feedback: ${message_reponse}`);
     }
 
     return NextResponse.json({ message: "Mise à jour effectuée" });

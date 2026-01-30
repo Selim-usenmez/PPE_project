@@ -100,6 +100,8 @@ model Projet {
   participations ParticipationProjet[]
   reservations   ReservationSalle[]
   taches         Tache[] 
+  couleur        String        @default("#3b82f6") // Bleu par défaut
+  
   @@map("projets")
 }
 
@@ -242,6 +244,9 @@ model Signalement {
   employe        Employe  @relation(fields: [id_employe], references: [id_employe], onDelete: Cascade)
   id_ressource   String
   ressource      Ressource @relation(fields: [id_ressource], references: [id_ressource], onDelete: Cascade)
+  commentaire_tech String?  @db.Text // Note interne pour l'équipe technique
+  message_reponse  String?  @db.Text // Message affiché à l'employé
+  
   @@map("signalements")
 }
 

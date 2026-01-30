@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CalendarRange, ArrowLeft, Search, Sparkles, CheckCircle2, CalendarCheck, Lock, Save, Loader2, Lightbulb } from "lucide-react";
+import { 
+  CalendarRange, ArrowLeft, Search, Sparkles, CheckCircle2, 
+  CalendarCheck, Lock, Save, Loader2, Lightbulb 
+} from "lucide-react";
 
 // Fonction de formatage
 const formatForInput = (d: string | Date) => {
@@ -34,7 +37,6 @@ export default function EmployeReservationsPage() {
 
   const [form, setForm] = useState({ id_salle: "", id_ressource: "", id_projet: "", date_debut: "", date_fin: "", objet: "" });
 
-  // 🛑 CALCUL DE LA DATE MINIMUM (MAINTENANT)
   const [minDate, setMinDate] = useState("");
 
   useEffect(() => {
@@ -44,7 +46,6 @@ export default function EmployeReservationsPage() {
       const currentUser = JSON.parse(stored);
       setUser(currentUser);
 
-      // Calcul date min pour l'input
       const now = new Date();
       setMinDate(formatForInput(now));
 
@@ -58,12 +59,11 @@ export default function EmployeReservationsPage() {
       try {
         const [resSalles, resRessources, resProjets] = await Promise.all([
             fetch("/api/salles").then(r => r.json()),
-            fetch("/api/ressources?etat=DISPONIBLE").then(r => r.json()), 
+            fetch("/api/ressources").then(r => r.json()), // On récupère TOUT (pour afficher les HS grisés)
             fetch(`/api/employes/${currentUser.id_employe}/projets`).then(r => r.json()),
         ]);
         setSalles(resSalles); setRessources(resRessources); setMesProjets(Array.isArray(resProjets) ? resProjets : []);
         
-        // Initialiser dates (Maintenant -> +1h)
         const end = new Date(now); end.setHours(end.getHours() + 1);
         setForm(f => ({ ...f, date_debut: formatForInput(now), date_fin: formatForInput(end) }));
         
@@ -84,7 +84,6 @@ export default function EmployeReservationsPage() {
     return () => clearInterval(interval);
   }, [quotaResetTime, user]);
 
-  // Vérification Dispo
   useEffect(() => {
     const checkAvailability = async () => {
         if (!form.date_debut || !form.date_fin) return;
@@ -98,7 +97,6 @@ export default function EmployeReservationsPage() {
     return () => clearTimeout(timer);
   }, [form.date_debut, form.date_fin]);
 
-  // Appel IA
   const handleAnalyzeAI = async () => {
     if (!form.objet || form.objet.length < 5) return toast.warning("Décrivez d'abord votre besoin.");
     setAnalyzing(true);
@@ -134,8 +132,6 @@ export default function EmployeReservationsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (new Date(form.date_debut) >= new Date(form.date_fin)) return toast.error("La date de fin doit être après le début");
-    
-    // Vérification locale (UI) pour le passé
     if (new Date(form.date_debut) < new Date()) return toast.error("Impossible de réserver dans le passé !");
 
     try {
@@ -155,6 +151,7 @@ export default function EmployeReservationsPage() {
         } 
         else { 
             const err = await res.json(); 
+            // 🛑 GESTION ERREUR MAINTENANCE DU BACKEND
             toast.error(err.error || "Erreur lors de la réservation"); 
         }
     } catch (e) { toast.error("Erreur serveur"); }
@@ -173,7 +170,6 @@ export default function EmployeReservationsPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* FORMULAIRE GAUCHE */}
             <div className="lg:col-span-2">
                 <div className="glass-panel p-8 rounded-2xl border border-white/10 shadow-2xl bg-[#0f172a]/50">
                     <h2 className="text-lg font-bold mb-6 text-white border-b border-white/10 pb-4 flex items-center gap-2"><Search className="w-5 h-5 text-blue-400" /> Vos Critères</h2>
@@ -186,44 +182,49 @@ export default function EmployeReservationsPage() {
                             </div>
                         </div>
                         
-                        {/* INPUTS DATES CORRIGÉS AVEC MIN */}
                         <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-500 uppercase block">Début</label>
-                                <input 
-                                    type="datetime-local" 
-                                    className="glass-input w-full text-xs [color-scheme:dark]" 
-                                    required 
-                                    min={minDate} // 🛑 BLOCAGE VISUEL PASSÉ
-                                    value={form.date_debut} 
-                                    onChange={e => setForm({...form, date_debut: e.target.value})} 
-                                />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-500 uppercase block">Fin</label>
-                                <input 
-                                    type="datetime-local" 
-                                    className="glass-input w-full text-xs [color-scheme:dark]" 
-                                    required 
-                                    min={minDate} // 🛑 BLOCAGE VISUEL PASSÉ
-                                    value={form.date_fin} 
-                                    onChange={e => setForm({...form, date_fin: e.target.value})} 
-                                />
-                            </div>
+                            <div><label className="text-[10px] font-bold text-gray-500 uppercase block">Début</label><input type="datetime-local" className="glass-input w-full text-xs [color-scheme:dark]" required min={minDate} value={form.date_debut} onChange={e => setForm({...form, date_debut: e.target.value})} /></div>
+                            <div><label className="text-[10px] font-bold text-gray-500 uppercase block">Fin</label><input type="datetime-local" className="glass-input w-full text-xs [color-scheme:dark]" required min={minDate} value={form.date_fin} onChange={e => setForm({...form, date_fin: e.target.value})} /></div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Projet</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_projet} onChange={e => setForm({...form, id_projet: e.target.value})}><option value="">-- Sélectionner --</option>{mesProjets.map(p => <option key={p.id_projet} value={p.id_projet}>{p.nom_projet}</option>)}</select></div>
                             <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block flex justify-between">Salle {checking && <span className="text-blue-400 text-[9px] animate-pulse">Vérif...</span>}</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_salle} onChange={e => setForm({...form, id_salle: e.target.value})}><option value="">-- Aucune --</option>{salles.map(s => { const isTaken = occupied.rooms.includes(s.id_salle); return <option key={s.id_salle} value={s.id_salle} disabled={isTaken} className={isTaken ? "bg-red-900/20 text-gray-500" : "text-white"}>{s.nom_salle} {isTaken ? "🔴" : `(${s.capacite}p)`}</option> })}</select></div>
                         </div>
-                        <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Matériel</label><select className="glass-input w-full bg-[#0f172a]" value={form.id_ressource} onChange={e => setForm({...form, id_ressource: e.target.value})}><option value="">-- Aucun --</option>{ressources.map(r => { const isTaken = occupied.resources.includes(r.id_ressource); return <option key={r.id_ressource} value={r.id_ressource} disabled={isTaken} className={isTaken ? "bg-red-900/20 text-gray-500" : "text-white"}>{r.nom_ressource}</option> })}</select></div>
+                        
+                        {/* 🛑 MODIFICATION ICI : MATÉRIEL GRISÉ SI MAINTENANCE */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Matériel</label>
+                            <select 
+                                className="glass-input w-full bg-[#0f172a]" 
+                                value={form.id_ressource} 
+                                onChange={e => setForm({...form, id_ressource: e.target.value})}
+                            >
+                                <option value="">-- Aucun --</option>
+                                {ressources.map(r => { 
+                                    const isBroken = r.etat === "EN_MAINTENANCE" || r.etat === "HORS_SERVICE";
+                                    const isTaken = occupied.resources.includes(r.id_ressource);
+                                    const isDisabled = isBroken || isTaken;
+
+                                    return (
+                                        <option 
+                                            key={r.id_ressource} 
+                                            value={r.id_ressource} 
+                                            disabled={isDisabled} 
+                                            className={isDisabled ? "bg-red-900/20 text-gray-500" : "text-white"}
+                                        >
+                                            {isBroken ? `🔴 ${r.nom_ressource} (HS)` : isTaken ? `🟠 ${r.nom_ressource} (Occupé)` : r.nom_ressource}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        </div>
                         
                         <button type="submit" disabled={mesProjets.length === 0 || checking} className="w-full btn-neon-blue py-4 rounded-xl font-bold mt-4 shadow-lg flex items-center justify-center gap-2 text-white text-lg hover:scale-[1.01] transition-transform disabled:opacity-50">{checking ? <Loader2 className="animate-spin w-5 h-5"/> : <Save className="w-5 h-5"/>} Confirmer la réservation</button>
                     </form>
                 </div>
             </div>
 
-            {/* PANEL IA DROITE */}
             <div className="lg:col-span-1">
                 <div className="glass-panel p-6 rounded-2xl border border-blue-500/30 bg-gradient-to-b from-blue-900/20 to-[#0f172a] shadow-xl sticky top-8 h-fit">
                     <div className="flex items-center gap-3 mb-6 border-b border-blue-500/30 pb-4"><div className="bg-blue-500/20 p-2 rounded-lg text-blue-400"><Sparkles className="w-6 h-6" /></div><div><h3 className="font-bold text-white text-lg">Proposition IA</h3><p className="text-xs text-blue-300">Analyse intelligente</p></div></div>
