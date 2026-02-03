@@ -301,7 +301,12 @@ export default function EmployeDashboard() {
                 <div className="grid grid-cols-3 gap-2">
                     <button onClick={() => router.push('/employe/reservations')} className="p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl flex items-center justify-center transition shadow-lg shadow-blue-900/20"><Plus className="w-5 h-5"/></button>
                     <button onClick={() => setShowModalConges(true)} className="p-3 bg-pink-600 hover:bg-pink-500 text-white rounded-xl flex items-center justify-center transition shadow-lg shadow-pink-900/20" title="Poser des congés"><Sun className="w-5 h-5"/></button>
-                    <button onClick={() => router.push('/employe/incidents')} className="p-3 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl flex items-center justify-center transition border border-white/5"><AlertTriangle className="w-5 h-5"/></button>
+                    <button
+  onClick={() => router.push('/employe/incidents')}
+  className="p-3 bg-red-600 hover:bg-red-500 text-white rounded-xl flex items-center justify-center transition shadow-lg shadow-red-900/20"
+>
+  <AlertTriangle className="w-5 h-5"/>
+</button>
                 </div>
                 <div className="glass-panel p-5 rounded-2xl border border-white/10 flex-1 min-h-[200px] flex flex-col">
                     <h3 className="font-bold text-white text-sm mb-3 flex items-center gap-2"><StickyNote className="w-4 h-4 text-yellow-400"/> Notes Rapides</h3>
