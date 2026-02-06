@@ -19,17 +19,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Identifiants incorrects" }, { status: 401 });
     }
 
-    // 🛑 3. SÉCURITÉ CRITIQUE : VÉRIFICATION DES DATES (AVANT TOUT LE RESTE)
-    // C'est ici qu'on bloque l'utilisateur, même s'il a un cookie de confiance.
+    // 🛑 3. SÉCURITÉ CRITIQUE : VÉRIFICATION DES DATES
     const now = new Date();
     
-    // Cas A : Compte pas encore actif (Date début future)
+    // Cas A : Compte pas encore actif
     if (user.date_debut_validite && now < user.date_debut_validite) {
         await createLog("CONNEXION_REFUSEE", `Tentative avant date début (${user.date_debut_validite})`, user.id_employe);
         return NextResponse.json({ error: "Votre compte n'est pas encore actif." }, { status: 403 });
     }
 
-    // Cas B : Compte expiré (Date fin passée)
+    // Cas B : Compte expiré
     if (user.date_fin_validite && now > user.date_fin_validite) {
         await createLog("CONNEXION_REFUSEE", `Tentative après date fin (${user.date_fin_validite})`, user.id_employe);
         return NextResponse.json({ error: "Votre compte a expiré. Contactez l'admin." }, { status: 403 });
@@ -45,9 +44,7 @@ export async function POST(req: Request) {
     const trustCookie = cookieStore.get(`trusted_device_${user.id_employe}`);
     const SECRET = process.env.TRUST_DEVICE_SECRET || "SECRET_PAR_DEFAUT";
 
-    // Si le cookie est valide, on connecte (MAIS on a déjà vérifié les dates juste au-dessus ✅)
     if (trustCookie && trustCookie.value === SECRET) {
-        
         const sessionData = {
             id_employe: user.id_employe,
             nom: user.nom,
@@ -59,8 +56,6 @@ export async function POST(req: Request) {
         await createLog("CONNEXION", "Connexion auto (Appareil de confiance)", user.id_employe);
 
         const response = NextResponse.json({ success: true, ...sessionData });
-
-        // Durée session (30 jours si confiance)
         const duration = 30 * 24 * 60 * 60; 
 
         response.cookies.set("session_user", JSON.stringify(sessionData), { 
@@ -74,21 +69,43 @@ export async function POST(req: Request) {
         return response;
     }
 
-    // 6. SINON : ENVOI CODE 2FA
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expires = new Date(Date.now() + 10 * 60 * 1000);
+    // ============================================================
+    // 6. GESTION 2FA (AVEC BACKDOOR POUR LE JURY)
+    // ============================================================
+    
+    let code;
+    
+    // 👉 SI c'est un compte de test (pour les profs), on force le code 000000
+    if (email.endsWith("@nexus.test")) {
+        code = "000000";
+    } else {
+        // 👉 SINON, on génère un vrai code aléatoire
+        code = Math.floor(100000 + Math.random() * 900000).toString();
+    }
 
+    const expires = new Date(Date.now() + 10 * 60 * 1000); // Valide 10 min
+
+    // On enregistre le code en base (même pour le test, il faut qu'il soit en base pour être validé après)
     await prisma.employe.update({
       where: { id_employe: user.id_employe },
       data: { twoFactorCode: code, twoFactorExpires: expires }
     });
 
-    await resend.emails.send({
-      from: 'securite@likeus.dev', 
-      to: email,
-      subject: 'Code de vérification',
-      html: `<p>Votre code de connexion : <strong>${code}</strong></p>`
-    });
+    // 👉 ENVOI DE L'EMAIL (Seulement si ce n'est PAS un test)
+    if (!email.endsWith("@nexus.test")) {
+        try {
+            await resend.emails.send({
+                from: 'securite@likeus.dev', 
+                to: email,
+                subject: 'Code de vérification',
+                html: `<p>Votre code de connexion : <strong>${code}</strong></p>`
+            });
+        } catch (emailError) {
+            console.error("Erreur envoi email Resend:", emailError);
+            // On ne bloque pas l'erreur ici, l'utilisateur verra l'écran de saisie du code
+            // mais ne recevra rien (cas rare en prod, mais géré).
+        }
+    }
 
     return NextResponse.json({ require2fa: true, email: user.email });
 
