@@ -6,6 +6,8 @@ export async function GET(req: Request) {
   const userId = searchParams.get("userId"); // Voir SES propres congés
   const managerId = searchParams.get("managerId"); // Voir congés de l'ÉQUIPE
 
+  const projetId = searchParams.get("projetId");
+
   try {
     let conges;
 
@@ -40,6 +42,18 @@ export async function GET(req: Request) {
             where: { id_employe: userId },
             orderBy: { createdAt: 'desc' },
             include: { employe: { select: { nom: true, prenom: true } } }
+        });
+    } else if (projetId) {
+        // --- MODE RH FILTRÉE PAR PROJET ---
+        const participations = await prisma.participationProjet.findMany({
+            where: { id_projet: projetId },
+            select: { id_employe: true }
+        });
+        const idsEmployes = participations.map(p => p.id_employe);
+        conges = await prisma.conge.findMany({
+            where: { id_employe: { in: idsEmployes } },
+            include: { employe: { select: { nom: true, prenom: true, email: true } } },
+            orderBy: { createdAt: 'desc' }
         });
     } else {
         // --- MODE RH (Tout) ---

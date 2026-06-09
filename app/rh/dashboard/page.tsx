@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { 
-  UserPlus, Users, Search, Trash2, Mail, Briefcase, 
-  ArrowLeft, Loader2, Save, X, RotateCcw, User, Calendar, 
-  Pencil, Sun, CheckCircle2, XCircle, FileText 
+import {
+  UserPlus, Users, Search, Trash2, Briefcase,
+  ArrowLeft, Loader2, X, RotateCcw, Calendar,
+  Pencil, Sun, CheckCircle2, XCircle, FileText,
+  AlertTriangle, Filter
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,6 +26,14 @@ export default function RHDashboard() {
       { id: 2, titre: "Commercial B2B", cands: 12, statut: "FERMEE" }
   ]);
 
+  // --- ÉTATS CONGÉS ---
+  const [projets, setProjets] = useState<any[]>([]);
+  const [projetFilter, setProjetFilter] = useState("");
+  const [statutFilter, setStatutFilter] = useState("TOUS");
+  const today = new Date().toISOString().split("T")[0];
+  const [statsDate, setStatsDate] = useState(today);
+  const [statsJour, setStatsJour] = useState<{ totalEmployes: number; enConge: number; pourcentage: number; alerte50pct: boolean } | null>(null);
+
   // --- ÉTATS MODALES EFFECTIFS ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -38,27 +47,49 @@ export default function RHDashboard() {
   });
 
   // --- CHARGEMENT INITIAL ---
-  useEffect(() => { 
-      const initData = async () => {
-          await Promise.all([fetchEmployes(), fetchConges()]);
-          setLoading(false);
-      };
-      initData();
+  useEffect(() => {
+    const initData = async () => {
+      await Promise.all([fetchEmployes(), fetchConges(""), fetchProjets(), fetchStatsJour(today, "")]);
+      setLoading(false);
+    };
+    initData();
   }, []);
+
+  // Re-fetch congés + stats quand le filtre projet ou la date changent
+  useEffect(() => {
+    fetchConges(projetFilter);
+    fetchStatsJour(statsDate, projetFilter);
+  }, [projetFilter, statsDate]);
 
   const fetchEmployes = async () => {
     try {
       const res = await fetch("/api/employes");
       if (res.ok) setEmployes(await res.json());
-    } catch (e) { toast.error("Erreur chargement employés"); }
+    } catch { toast.error("Erreur chargement employés"); }
   };
 
-  const fetchConges = async () => {
-      try {
-          // Appel sans userId = récupère TOUS les congés (côté API)
-          const res = await fetch("/api/conges");
-          if (res.ok) setConges(await res.json());
-      } catch (e) { toast.error("Erreur chargement congés"); }
+  const fetchProjets = async () => {
+    try {
+      const res = await fetch("/api/projets");
+      if (res.ok) setProjets(await res.json());
+    } catch { toast.error("Erreur chargement projets"); }
+  };
+
+  const fetchConges = async (projetId = "") => {
+    try {
+      const url = projetId ? `/api/conges?projetId=${projetId}` : "/api/conges";
+      const res = await fetch(url);
+      if (res.ok) setConges(await res.json());
+    } catch { toast.error("Erreur chargement congés"); }
+  };
+
+  const fetchStatsJour = async (date: string, projetId = "") => {
+    try {
+      const params = new URLSearchParams({ date });
+      if (projetId) params.set("projetId", projetId);
+      const res = await fetch(`/api/conges/stats?${params}`);
+      if (res.ok) setStatsJour(await res.json());
+    } catch { /* silencieux */ }
   };
 
   // --- ACTION VALIDATION CONGÉS ---
@@ -260,51 +291,134 @@ export default function RHDashboard() {
             </div>
         )}
 
-        {/* --- ONGLET 3 : CONGÉS (CORRIGÉ & DYNAMIQUE) --- */}
+        {/* --- ONGLET 3 : CONGÉS --- */}
         {activeTab === "CONGES" && (
-            <div className="glass-panel p-6 rounded-2xl border border-white/10 animate-fade-in">
-                <h2 className="text-lg font-bold text-white mb-6">Demandes de Congés en attente</h2>
-                
-                {conges.length === 0 && <p className="text-gray-500 text-sm italic text-center py-10">Aucune demande pour le moment.</p>}
+            <div className="space-y-6 animate-fade-in">
 
-                <div className="space-y-3">
-                    {conges.map(c => (
-                        <div key={c.id_conge} className="p-4 bg-white/5 rounded-xl border border-white/5 flex justify-between items-center group hover:border-pink-500/30 transition">
-                            <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-full bg-pink-500/20 flex items-center justify-center text-pink-400 font-bold uppercase">
-                                    {c.employe?.prenom?.[0] || "?"}{c.employe?.nom?.[0] || "?"}
-                                </div>
-                                <div>
-                                    <p className="text-white font-bold text-sm">
-                                        {c.employe?.prenom} {c.employe?.nom}
-                                    </p>
-                                    <p className="text-xs text-gray-400 flex gap-2 items-center mt-1">
-                                        <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wide">{c.type}</span> 
-                                        <span>Du {new Date(c.date_debut).toLocaleDateString()} au {new Date(c.date_fin).toLocaleDateString()}</span>
-                                    </p>
-                                    {c.commentaire && <p className="text-xs text-gray-500 mt-1 italic">"{c.commentaire}"</p>}
-                                </div>
+                {/* KPI + ALERTE DU JOUR */}
+                <div className={`glass-panel p-6 rounded-2xl border ${statsJour?.alerte50pct ? "border-red-500/50 bg-red-500/5" : "border-white/10"}`}>
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                            <div className={`p-3 rounded-xl ${statsJour?.alerte50pct ? "bg-red-500/20 text-red-400" : "bg-pink-500/10 text-pink-400"}`}>
+                                {statsJour?.alerte50pct ? <AlertTriangle className="w-7 h-7"/> : <Sun className="w-7 h-7"/>}
                             </div>
-                            
-                            {c.statut === 'EN_ATTENTE' ? (
-                                <div className="flex gap-2">
-                                    <button onClick={() => handleConges(c.id_conge, 'VALIDE')} className="px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg text-xs font-bold transition flex items-center gap-1">
-                                        <CheckCircle2 className="w-3 h-3"/> Valider
-                                    </button>
-                                    <button onClick={() => handleConges(c.id_conge, 'REFUSE')} className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-bold transition flex items-center gap-1">
-                                        <XCircle className="w-3 h-3"/> Refuser
-                                    </button>
-                                </div>
-                            ) : (
-                                <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
-                                    c.statut === 'VALIDE' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 
-                                    'bg-red-500/10 text-red-400 border-red-500/20'
-                                }`}>
-                                    {c.statut}
-                                </span>
-                            )}
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Employés en congé</p>
+                                <p className={`text-4xl font-bold ${statsJour?.alerte50pct ? "text-red-400" : "text-white"}`}>
+                                    {statsJour ? `${statsJour.pourcentage}%` : "—"}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    {statsJour ? `${statsJour.enConge} / ${statsJour.totalEmployes} employé${statsJour.totalEmployes > 1 ? "s" : ""}` : "Chargement..."}
+                                    {projetFilter && projets.find(p => p.id_projet === projetFilter) && (
+                                        <span className="ml-2 text-pink-400">— {projets.find(p => p.id_projet === projetFilter)?.nom_projet}</span>
+                                    )}
+                                </p>
+                            </div>
                         </div>
-                    ))}
+                        <div className="flex flex-col items-end gap-1">
+                            <label className="text-xs text-gray-500 font-bold uppercase">Jour consulté</label>
+                            <input
+                                type="date"
+                                value={statsDate}
+                                onChange={e => setStatsDate(e.target.value)}
+                                className="glass-input text-sm bg-[#0f172a] px-3 py-2 rounded-lg border border-white/10"
+                            />
+                        </div>
+                    </div>
+                    {statsJour?.alerte50pct && (
+                        <div className="mt-4 flex items-center gap-2 text-sm font-bold text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+                            <AlertTriangle className="w-4 h-4 shrink-0"/>
+                            ALERTE — {statsJour.pourcentage}% des effectifs{projetFilter && projets.find(p => p.id_projet === projetFilter) ? ` du projet "${projets.find(p => p.id_projet === projetFilter)?.nom_projet}"` : ""} sont en congé ce jour. Capacité critique !
+                        </div>
+                    )}
+                </div>
+
+                {/* FILTRES */}
+                <div className="glass-panel p-4 rounded-2xl border border-white/10 flex flex-wrap gap-4 items-center">
+                    <div className="flex items-center gap-2">
+                        <Filter className="w-4 h-4 text-gray-500"/>
+                        <span className="text-xs text-gray-400 font-bold uppercase">Filtres</span>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-gray-500 font-bold uppercase ml-1">Projet</label>
+                        <select
+                            value={projetFilter}
+                            onChange={e => setProjetFilter(e.target.value)}
+                            className="glass-input text-sm bg-[#0f172a] px-3 py-2 rounded-lg border border-white/10 min-w-[180px]"
+                        >
+                            <option value="">Tous les projets</option>
+                            {projets.map(p => (
+                                <option key={p.id_projet} value={p.id_projet}>{p.nom_projet}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-gray-500 font-bold uppercase ml-1">Statut</label>
+                        <select
+                            value={statutFilter}
+                            onChange={e => setStatutFilter(e.target.value)}
+                            className="glass-input text-sm bg-[#0f172a] px-3 py-2 rounded-lg border border-white/10"
+                        >
+                            <option value="TOUS">Tous</option>
+                            <option value="EN_ATTENTE">En attente</option>
+                            <option value="VALIDE">Validé</option>
+                            <option value="REFUSE">Refusé</option>
+                        </select>
+                    </div>
+                </div>
+
+                {/* LISTE DES CONGÉS */}
+                <div className="glass-panel p-6 rounded-2xl border border-white/10">
+                    <h2 className="text-lg font-bold text-white mb-4">
+                        Congés
+                        <span className="ml-2 text-sm font-normal text-gray-500">
+                            ({conges.filter(c => statutFilter === "TOUS" || c.statut === statutFilter).length} résultat{conges.filter(c => statutFilter === "TOUS" || c.statut === statutFilter).length > 1 ? "s" : ""})
+                        </span>
+                    </h2>
+
+                    {conges.filter(c => statutFilter === "TOUS" || c.statut === statutFilter).length === 0 && (
+                        <p className="text-gray-500 text-sm italic text-center py-10">Aucun congé pour ces filtres.</p>
+                    )}
+
+                    <div className="space-y-3">
+                        {conges
+                            .filter(c => statutFilter === "TOUS" || c.statut === statutFilter)
+                            .map(c => (
+                            <div key={c.id_conge} className="p-4 bg-white/5 rounded-xl border border-white/5 flex justify-between items-center group hover:border-pink-500/30 transition">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-full bg-pink-500/20 flex items-center justify-center text-pink-400 font-bold uppercase">
+                                        {c.employe?.prenom?.[0] || "?"}{c.employe?.nom?.[0] || "?"}
+                                    </div>
+                                    <div>
+                                        <p className="text-white font-bold text-sm">{c.employe?.prenom} {c.employe?.nom}</p>
+                                        <p className="text-xs text-gray-400 flex gap-2 items-center mt-1">
+                                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wide">{c.type}</span>
+                                            <span>Du {new Date(c.date_debut).toLocaleDateString()} au {new Date(c.date_fin).toLocaleDateString()}</span>
+                                        </p>
+                                        {c.commentaire && <p className="text-xs text-gray-500 mt-1 italic">"{c.commentaire}"</p>}
+                                    </div>
+                                </div>
+
+                                {c.statut === "EN_ATTENTE" ? (
+                                    <div className="flex gap-2">
+                                        <button onClick={() => handleConges(c.id_conge, "VALIDE")} className="px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg text-xs font-bold transition flex items-center gap-1">
+                                            <CheckCircle2 className="w-3 h-3"/> Valider
+                                        </button>
+                                        <button onClick={() => handleConges(c.id_conge, "REFUSE")} className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-bold transition flex items-center gap-1">
+                                            <XCircle className="w-3 h-3"/> Refuser
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                                        c.statut === "VALIDE" ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                                        "bg-red-500/10 text-red-400 border-red-500/20"
+                                    }`}>
+                                        {c.statut}
+                                    </span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         )}
